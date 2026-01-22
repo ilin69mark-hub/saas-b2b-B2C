@@ -1,0 +1,31 @@
+{
+  "name": "franchise-saas-platform",
+  "version": "1.0.0",
+  "description": "SaaS платформа управления франчайзинговой сетью",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && go run cmd/server/main.go",
+    "build": "cd frontend && npm run build",
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "cd frontend && npm run test",
+    "test:backend": "cd backend && go test ./...",
+    "docker:up": "docker-compose up --build",
+    "docker:down": "docker-compose down",
+    "prepare": "husky install"
+  },
+  "keywords": [
+    "saas",
+    "franchise",
+    "management",
+    "network",
+    "b2b"
+  ],
+  "author": "Franchise SaaS Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "husky": "^8.0.0"
+  }
+}
