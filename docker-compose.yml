@@ -1,40 +1,10 @@
 version: '3.8'
 
 services:
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=http://localhost:8080
-    depends_on:
-      - backend
-    restart: unless-stopped
-
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    ports:
-      - "8080:8080"
-    environment:
-      - NODE_ENV=production
-      - PORT=8080
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - DB_NAME=franchise_db
-      - JWT_SECRET=supersecretkeyfordevelopment
-    depends_on:
-      - postgres
-    restart: unless-stopped
-
+  # PostgreSQL база данных
   postgres:
     image: postgres:15-alpine
+    container_name: franchise-postgres
     ports:
       - "5432:5432"
     environment:
@@ -43,14 +13,78 @@ services:
       - POSTGRES_PASSWORD=postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/migrations:/migrations
+      - ./backend/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
+    networks:
+      - franchise-network
 
+  # Redis для кэширования
   redis:
     image: redis:7-alpine
+    container_name: franchise-redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
+    networks:
+      - franchise-network
+
+  # Backend API (Go)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: franchise-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=franchise_db
+      - JWT_SECRET=supersecretkeyfordevelopment_change_in_production
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - franchise-network
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: franchise-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost:8080
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - franchise-network
 
 volumes:
   postgres_data:
+    driver: local
+
+networks:
+  franchise-network:
+    driver: bridge

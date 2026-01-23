@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"strings"
 
-	"franchise-saas-backend/internal/services"
-
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/spf13/viper"
@@ -44,7 +42,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, errors.New("unexpected signing method")
 			}
-			
+
 			// Return the secret key
 			return []byte(viper.GetString("jwt_secret")), nil
 		})

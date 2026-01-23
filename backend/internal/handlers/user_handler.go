@@ -15,15 +15,15 @@ type UserHandler struct {
 	service *services.UserService
 }
 
-func NewUserHandler(db interface{}) *UserHandler {
+func NewUserHandler(service *services.UserService) *UserHandler {
 	return &UserHandler{
-		service: services.NewUserService(db),
+		service: service,
 	}
 }
 
-// GetProfile retrieves the authenticated user's profile
-// @Summary Get user profile
-// @Description Get the profile of the authenticated user
+// GetProfile получает профиль аутентифицированного пользователя
+// @Summary Получение профиля пользователя
+// @Description Получение профиля текущего аутентифицированного пользователя
 // @Tags users
 // @Security BearerAuth
 // @Produce json
@@ -32,12 +32,12 @@ func NewUserHandler(db interface{}) *UserHandler {
 // @Failure 500 {object} models.ErrorResponse
 // @Router /users/profile [get]
 func (h *UserHandler) GetProfile(c *gin.Context) {
-	// Extract user ID from context (set by middleware)
+	// Извлечение ID пользователя из контекста (устанавливается middleware)
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Error:   "Authentication required",
-			Message: "User not authenticated",
+			Error:   "Требуется аутентификация",
+			Message: "Пользователь не аутентифицирован",
 		})
 		return
 	}
@@ -45,45 +45,45 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 	user, err := h.service.GetUserByID(userID.(string))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "Failed to retrieve user",
-			Message: "Could not fetch user profile",
+			Error:   "Не удалось получить данные пользователя",
+			Message: "Не удалось загрузить профиль пользователя",
 		})
 		return
 	}
 
 	if user == nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
-			Error:   "User not found",
-			Message: "The requested user does not exist",
+			Error:   "Пользователь не найден",
+			Message: "Запрашиваемый пользователь не существует",
 		})
 		return
 	}
 
-	// Don't return the password hash
+	// Не возвращаем хеш пароля
 	user.Password = ""
 	c.JSON(http.StatusOK, user)
 }
 
-// UpdateProfile updates the authenticated user's profile
-// @Summary Update user profile
-// @Description Update the profile of the authenticated user
+// UpdateProfile обновляет профиль аутентифицированного пользователя
+// @Summary Обновление профиля пользователя
+// @Description Обновление профиля текущего аутентифицированного пользователя
 // @Tags users
 // @Security BearerAuth
 // @Accept json
 // @Produce json
-// @Param user body models.UserUpdateRequest true "User update data"
+// @Param user body models.UserUpdateRequest true "Данные для обновления"
 // @Success 200 {object} models.User
 // @Failure 400 {object} models.ErrorResponse
 // @Failure 401 {object} models.ErrorResponse
 // @Failure 500 {object} models.ErrorResponse
 // @Router /users/profile [put]
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
-	// Extract user ID from context (set by middleware)
+	// Извлечение ID пользователя из контекста
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Error:   "Authentication required",
-			Message: "User not authenticated",
+			Error:   "Требуется аутентификация",
+			Message: "Пользователь не аутентифицирован",
 		})
 		return
 	}
@@ -91,30 +91,30 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	var req models.UserUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Invalid request data",
+			Error:   "Неверные данные запроса",
 			Message: err.Error(),
 		})
 		return
 	}
 
-	// Update user
+	// Обновление данных пользователя
 	updatedUser, err := h.service.UpdateUser(userID.(string), req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "Failed to update user",
-			Message: "Could not update user profile",
+			Error:   "Не удалось обновить пользователя",
+			Message: "Не удалось обновить профиль пользователя",
 		})
 		return
 	}
 
-	// Don't return the password hash
+	// Не возвращаем хеш пароля
 	updatedUser.Password = ""
 	c.JSON(http.StatusOK, updatedUser)
 }
 
-// GetAllDealers retrieves all dealers for franchiser
-// @Summary Get all dealers
-// @Description Get all dealers in the franchise network (accessible by franchiser only)
+// GetAllDealers получает всех дилеров для франчайзера
+// @Summary Получение всех дилеров
+// @Description Получение всех дилеров франчайзинговой сети (доступно только франчайзеру)
 // @Tags dealers
 // @Security BearerAuth
 // @Produce json
@@ -124,41 +124,41 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 // @Failure 500 {object} models.ErrorResponse
 // @Router /dealers [get]
 func (h *UserHandler) GetAllDealers(c *gin.Context) {
-	// Extract user role from context (set by middleware)
+	// Извлечение роли пользователя из контекста
 	userRole, exists := c.Get("role")
 	if !exists || userRole != "franchiser" {
 		c.JSON(http.StatusForbidden, models.ErrorResponse{
-			Error:   "Access denied",
-			Message: "Only franchisers can access this resource",
+			Error:   "Доступ запрещён",
+			Message: "Только франчайзеры могут получить доступ к этому ресурсу",
 		})
 		return
 	}
 
-	// Extract tenant ID from context
+	// Извлечение ID тенанта из контекста
 	tenantID, exists := c.Get("tenantID")
 	if !exists {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "Server error",
-			Message: "Missing tenant information",
+			Error:   "Ошибка сервера",
+			Message: "Отсутствует информация о тенанте",
 		})
 		return
 	}
 
 	dealerType := c.Query("type")
 	if dealerType == "" {
-		dealerType = "dealer" // default
+		dealerType = "dealer" // по умолчанию
 	}
 
 	dealers, err := h.service.GetDealersByTenant(tenantID.(string), dealerType)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "Failed to retrieve dealers",
-			Message: "Could not fetch dealer list",
+			Error:   "Не удалось получить дилеров",
+			Message: "Не удалось загрузить список дилеров",
 		})
 		return
 	}
 
-	// Don't return password hashes
+	// Не возвращаем хеши паролей
 	for i := range dealers {
 		dealers[i].Password = ""
 	}
@@ -166,13 +166,13 @@ func (h *UserHandler) GetAllDealers(c *gin.Context) {
 	c.JSON(http.StatusOK, dealers)
 }
 
-// GetDealerByID retrieves a specific dealer by ID
-// @Summary Get dealer by ID
-// @Description Get a specific dealer by ID (accessible by franchiser only)
+// GetDealerByID получает конкретного дилера по ID
+// @Summary Получение дилера по ID
+// @Description Получение конкретного дилера по ID (доступно только франчайзеру)
 // @Tags dealers
 // @Security BearerAuth
 // @Produce json
-// @Param id path string true "Dealer ID"
+// @Param id path string true "ID дилера"
 // @Success 200 {object} models.User
 // @Failure 401 {object} models.ErrorResponse
 // @Failure 403 {object} models.ErrorResponse
@@ -180,23 +180,23 @@ func (h *UserHandler) GetAllDealers(c *gin.Context) {
 // @Failure 500 {object} models.ErrorResponse
 // @Router /dealers/{id} [get]
 func (h *UserHandler) GetDealerByID(c *gin.Context) {
-	// Extract user role from context (set by middleware)
+	// Извлечение роли пользователя из контекста
 	userRole, exists := c.Get("role")
 	if !exists || userRole != "franchiser" {
 		c.JSON(http.StatusForbidden, models.ErrorResponse{
-			Error:   "Access denied",
-			Message: "Only franchisers can access this resource",
+			Error:   "Доступ запрещён",
+			Message: "Только франчайзеры могут получить доступ к этому ресурсу",
 		})
 		return
 	}
 
 	dealerID := c.Param("id")
-	
-	// Validate UUID format
+
+	// Валидация формата UUID
 	if _, err := uuid.Parse(dealerID); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Invalid dealer ID",
-			Message: "The provided dealer ID is not valid",
+			Error:   "Неверный ID дилера",
+			Message: "Предоставленный ID дилера некорректен",
 		})
 		return
 	}
@@ -204,21 +204,21 @@ func (h *UserHandler) GetDealerByID(c *gin.Context) {
 	dealer, err := h.service.GetUserByID(dealerID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "Failed to retrieve dealer",
-			Message: "Could not fetch dealer information",
+			Error:   "Не удалось получить дилера",
+			Message: "Не удалось загрузить информацию о дилере",
 		})
 		return
 	}
 
 	if dealer == nil || !strings.EqualFold(dealer.Role, "dealer") {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
-			Error:   "Dealer not found",
-			Message: "The requested dealer does not exist",
+			Error:   "Дилер не найден",
+			Message: "Запрашиваемый дилер не существует",
 		})
 		return
 	}
 
-	// Don't return password hash
+	// Не возвращаем хеш пароля
 	dealer.Password = ""
 	c.JSON(http.StatusOK, dealer)
 }

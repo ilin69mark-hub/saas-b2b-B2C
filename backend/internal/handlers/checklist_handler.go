@@ -15,24 +15,13 @@ type ChecklistHandler struct {
 	service *services.ChecklistService
 }
 
-func NewChecklistHandler(db interface{}) *ChecklistHandler {
+func NewChecklistHandler(service *services.ChecklistService) *ChecklistHandler {
 	return &ChecklistHandler{
-		service: services.NewChecklistService(db),
+		service: service,
 	}
 }
 
 // GetChecklists retrieves all checklists for the authenticated user
-// @Summary Get user's checklists
-// @Description Get all checklists for the authenticated user
-// @Tags checklists
-// @Security BearerAuth
-// @Produce json
-// @Param page query int false "Page number" default(1)
-// @Param limit query int false "Items per page" default(10)
-// @Success 200 {array} models.Checklist
-// @Failure 401 {object} models.ErrorResponse
-// @Failure 500 {object} models.ErrorResponse
-// @Router /checklists [get]
 func (h *ChecklistHandler) GetChecklists(c *gin.Context) {
 	// Extract user ID from context (set by middleware)
 	userID, exists := c.Get("userID")
@@ -72,19 +61,8 @@ func (h *ChecklistHandler) GetChecklists(c *gin.Context) {
 }
 
 // GetChecklistByID retrieves a specific checklist by ID
-// @Summary Get checklist by ID
-// @Description Get a specific checklist by ID
-// @Tags checklists
-// @Security BearerAuth
-// @Produce json
-// @Param id path string true "Checklist ID"
-// @Success 200 {object} models.Checklist
-// @Failure 401 {object} models.ErrorResponse
-// @Failure 404 {object} models.ErrorResponse
-// @Failure 500 {object} models.ErrorResponse
-// @Router /checklists/{id} [get]
 func (h *ChecklistHandler) GetChecklistByID(c *gin.Context) {
-	// Extract user ID from context (set by middleware)
+	// Extract user ID from context
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
@@ -126,20 +104,8 @@ func (h *ChecklistHandler) GetChecklistByID(c *gin.Context) {
 }
 
 // CreateChecklist creates a new checklist
-// @Summary Create a new checklist
-// @Description Create a new checklist for the authenticated user
-// @Tags checklists
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Param checklist body models.ChecklistCreateRequest true "Checklist data"
-// @Success 201 {object} models.Checklist
-// @Failure 400 {object} models.ErrorResponse
-// @Failure 401 {object} models.ErrorResponse
-// @Failure 500 {object} models.ErrorResponse
-// @Router /checklists [post]
 func (h *ChecklistHandler) CreateChecklist(c *gin.Context) {
-	// Extract user ID from context (set by middleware)
+	// Extract user ID from context
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
@@ -183,22 +149,8 @@ func (h *ChecklistHandler) CreateChecklist(c *gin.Context) {
 }
 
 // UpdateChecklist updates an existing checklist
-// @Summary Update a checklist
-// @Description Update an existing checklist
-// @Tags checklists
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Param id path string true "Checklist ID"
-// @Param checklist body models.ChecklistUpdateRequest true "Updated checklist data"
-// @Success 200 {object} models.Checklist
-// @Failure 400 {object} models.ErrorResponse
-// @Failure 401 {object} models.ErrorResponse
-// @Failure 404 {object} models.ErrorResponse
-// @Failure 500 {object} models.ErrorResponse
-// @Router /checklists/{id} [put]
 func (h *ChecklistHandler) UpdateChecklist(c *gin.Context) {
-	// Extract user ID from context (set by middleware)
+	// Extract user ID from context
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
@@ -238,7 +190,7 @@ func (h *ChecklistHandler) UpdateChecklist(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "Failed to update checklist",
 			Message: "Could not update checklist",
@@ -250,19 +202,8 @@ func (h *ChecklistHandler) UpdateChecklist(c *gin.Context) {
 }
 
 // DeleteChecklist deletes a checklist
-// @Summary Delete a checklist
-// @Description Delete a checklist by ID
-// @Tags checklists
-// @Security BearerAuth
-// @Produce json
-// @Param id path string true "Checklist ID"
-// @Success 200 {object} models.SuccessResponse
-// @Failure 401 {object} models.ErrorResponse
-// @Failure 404 {object} models.ErrorResponse
-// @Failure 500 {object} models.ErrorResponse
-// @Router /checklists/{id} [delete]
 func (h *ChecklistHandler) DeleteChecklist(c *gin.Context) {
-	// Extract user ID from context (set by middleware)
+	// Extract user ID from context
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
@@ -292,7 +233,7 @@ func (h *ChecklistHandler) DeleteChecklist(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "Failed to delete checklist",
 			Message: "Could not delete checklist",
@@ -306,19 +247,8 @@ func (h *ChecklistHandler) DeleteChecklist(c *gin.Context) {
 }
 
 // CompleteChecklist marks a checklist as completed
-// @Summary Complete a checklist
-// @Description Mark a checklist as completed
-// @Tags checklists
-// @Security BearerAuth
-// @Produce json
-// @Param id path string true "Checklist ID"
-// @Success 200 {object} models.Checklist
-// @Failure 401 {object} models.ErrorResponse
-// @Failure 404 {object} models.ErrorResponse
-// @Failure 500 {object} models.ErrorResponse
-// @Router /checklists/{id}/complete [post]
 func (h *ChecklistHandler) CompleteChecklist(c *gin.Context) {
-	// Extract user ID from context (set by middleware)
+	// Extract user ID from context
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
@@ -348,7 +278,7 @@ func (h *ChecklistHandler) CompleteChecklist(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "Failed to complete checklist",
 			Message: "Could not mark checklist as completed",
