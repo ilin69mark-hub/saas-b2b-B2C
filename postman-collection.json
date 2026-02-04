@@ -1,0 +1,334 @@
+{
+  "info": {
+    "name": "Franchise SaaS Auth",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "API для регистрации, входа и проверки аутентификации в Franchise SaaS. Коллекция включает полные тесты и проверки ответов."
+  },
+  "item": [
+    {
+      "name": "1. Register - Регистрация нового пользователя",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"admin123\",\n  \"role\": \"franchiser\",\n  \"tenant_id\": \"main-network\",\n  \"first_name\": \"Администратор\",\n  \"last_name\": \"Системы\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/auth/register",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "v1", "auth", "register"]
+        },
+        "description": "Создание нового пользователя в системе. Требует email, пароль и роль."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Проверка статуса ответа",
+              "pm.test(\"✅ Регистрация прошла успешно - Статус 201 Created\", function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "",
+              "// Проверка формата ответа",
+              "pm.test(\"✅ Ответ в формате JSON\", function () {",
+              "    pm.response.to.be.withBody;",
+              "    pm.response.to.be.json;",
+              "});",
+              "",
+              "// Проверка структуры ответа",
+              "if (pm.response.to.have.status(201)) {",
+              "    const jsonData = pm.response.json();",
+              "    ",
+              "    pm.test(\"✅ Ответ содержит ожидаемые поля\", function () {",
+              "        pm.expect(jsonData).to.have.property('id');",
+              "        pm.expect(jsonData).to.have.property('email');",
+              "        pm.expect(jsonData).to.have.property('role');",
+              "        pm.expect(jsonData).to.have.property('tenant_id');",
+              "    });",
+              "    ",
+              "    pm.test(\"✅ Email совпадает с запрашиваемым\", function () {",
+              "        pm.expect(jsonData.email).to.eql(pm.request.body.raw.match(/\\\"email\\\": \\\"(.+?)\\\"/)[1]);",
+              "    });",
+              "}",
+              "",
+              "// Проверка ошибок",
+              "if (pm.response.to.have.status(400)) {",
+              "    pm.test(\"❌ Ошибка валидации данных\", function () {",
+              "        const jsonData = pm.response.json();",
+              "        pm.expect(jsonData).to.have.property('error');",
+              "        pm.expect(jsonData.error).to.include(\"Validation error\");",
+              "    });",
+              "}",
+              "",
+              "if (pm.response.to.have.status(409)) {",
+              "    pm.test(\"❌ Пользователь уже существует\", function () {",
+              "        const jsonData = pm.response.json();",
+              "        pm.expect(jsonData).to.have.property('error');",
+              "        pm.expect(jsonData.error).to.include(\"User already exists\");",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "2. Login - Аутентификация пользователя",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"admin123\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/auth/login",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "v1", "auth", "login"]
+        },
+        "description": "Аутентификация пользователя и получение JWT токенов."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Проверка успешной аутентификации",
+              "if (pm.response.code === 200) {",
+              "    const jsonData = pm.response.json();",
+              "    ",
+              "    pm.test(\"✅ Успешный вход - Статус 200 OK\", function () {",
+              "        pm.response.to.have.status(200);",
+              "    });",
+              "    ",
+              "    pm.test(\"✅ Ответ содержит токены\", function () {",
+              "        pm.expect(jsonData).to.have.property('token');",
+              "        pm.expect(jsonData).to.have.property('refresh_token');",
+              "    });",
+              "    ",
+              "    pm.test(\"✅ Токены не пустые\", function () {",
+              "        pm.expect(jsonData.token).to.be.a('string').and.not.empty;",
+              "        pm.expect(jsonData.refresh_token).to.be.a('string').and.not.empty;",
+              "    });",
+              "    ",
+              "    // Сохранение токенов в переменные окружения",
+              "    pm.environment.set(\"auth_token\", jsonData.token);",
+              "    pm.environment.set(\"refresh_token\", jsonData.refresh_token);",
+              "    ",
+              "    pm.test(\"✅ Токены сохранены в переменные окружения\", function () {",
+              "        pm.expect(pm.environment.get(\"auth_token\")).to.eql(jsonData.token);",
+              "        pm.expect(pm.environment.get(\"refresh_token\")).to.eql(jsonData.refresh_token);",
+              "    });",
+              "} else {",
+              "    // Обработка различных ошибок аутентификации",
+              "    pm.test(\"❌ Аутентификация не удалась - Статус \" + pm.response.code, function () {",
+              "        const jsonData = pm.response.json();",
+              "        ",
+              "        if (pm.response.code === 401) {",
+              "            pm.expect(jsonData.error).to.include(\"Invalid credentials\");",
+              "        } else if (pm.response.code === 400) {",
+              "            pm.expect(jsonData.error).to.include(\"Validation error\");",
+              "        }",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "3. Me - Получение данных текущего пользователя",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8080/api/v1/auth/me",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "v1", "auth", "me"]
+        },
+        "description": "Получение данных авторизованного пользователя. Требует Bearer токен."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Проверка успешного получения данных",
+              "if (pm.response.code === 200) {",
+              "    const jsonData = pm.response.json();",
+              "    ",
+              "    pm.test(\"✅ Данные пользователя получены - Статус 200 OK\", function () {",
+              "        pm.response.to.have.status(200);",
+              "    });",
+              "    ",
+              "    pm.test(\"✅ Ответ содержит полные данные пользователя\", function () {",
+              "        pm.expect(jsonData).to.have.all.keys('id', 'email', 'first_name', 'last_name', 'role', 'tenant_id', 'created_at', 'updated_at');",
+              "    });",
+              "    ",
+              "    pm.test(\"✅ Email не пустой\", function () {",
+              "        pm.expect(jsonData.email).to.be.a('string').and.not.empty;",
+              "    });",
+              "    ",
+              "    pm.test(\"✅ Роль пользователя установлена\", function () {",
+              "        pm.expect(jsonData.role).to.be.oneOf(['franchiser', 'admin', 'user']);",
+              "    });",
+              "} else if (pm.response.code === 401) {",
+              "    pm.test(\"❌ Неавторизованный доступ - Требуется аутентификация\", function () {",
+              "        const jsonData = pm.response.json();",
+              "        pm.expect(jsonData.error).to.include(\"Unauthorized\");",
+              "    });",
+              "} else if (pm.response.code === 403) {",
+              "    pm.test(\"❌ Доступ запрещён - Недостаточно прав\", function () {",
+              "        const jsonData = pm.response.json();",
+              "        pm.expect(jsonData.error).to.include(\"Forbidden\");",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "4. Refresh Token - Обновление JWT токена",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/auth/refresh",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "v1", "auth", "refresh"]
+        },
+        "description": "Обновление короткоживущего JWT токена с использованием refresh токена."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Проверка успешного обновления токена",
+              "if (pm.response.code === 200) {",
+              "    const jsonData = pm.response.json();",
+              "    ",
+              "    pm.test(\"✅ Токен успешно обновлён - Статус 200 OK\", function () {",
+              "        pm.response.to.have.status(200);",
+              "    });",
+              "    ",
+              "    pm.test(\"✅ Новый токен получен\", function () {",
+              "        pm.expect(jsonData).to.have.property('token');",
+              "        pm.expect(jsonData.token).to.be.a('string').and.not.empty;",
+              "    });",
+              "    ",
+              "    // Сохранение нового токена",
+              "    const oldToken = pm.environment.get(\"auth_token\");",
+              "    pm.environment.set(\"auth_token\", jsonData.token);",
+              "    ",
+              "    pm.test(\"✅ Новый токен сохранён в переменные\", function () {",
+              "        pm.expect(pm.environment.get(\"auth_token\")).to.eql(jsonData.token);",
+              "    });",
+              "    ",
+              "    pm.test(\"✅ Новый токен отличается от старого\", function () {",
+              "        pm.expect(jsonData.token).to.not.eql(oldToken);",
+              "    });",
+              "} else if (pm.response.code === 401) {",
+              "    pm.test(\"❌ Невалидный или просроченный refresh токен\", function () {",
+              "        const jsonData = pm.response.json();",
+              "        pm.expect(jsonData.error).to.include(\"Invalid refresh token\") || pm.expect(jsonData.error).to.include(\"Token expired\");",
+              "    });",
+              "} else if (pm.response.code === 400) {",
+              "    pm.test(\"❌ Ошибка валидации данных\", function () {",
+              "        const jsonData = pm.response.json();",
+              "        pm.expect(jsonData.error).to.include(\"Validation error\");",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "exec": [
+          "// Логирование начала запроса",
+          "console.log('Выполняется запрос: ' + request.name);"
+        ],
+        "type": "text/javascript"
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "exec": [
+          "// Логирование завершения теста",
+          "console.log('Тест завершён для: ' + request.name);",
+          "console.log('Статус ответа: ' + responseCode.code);"
+        ],
+        "type": "text/javascript"
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "auth_token",
+      "value": "",
+      "type": "string",
+      "description": "Bearer токен для доступа к защищённым роутам"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string",
+      "description": "Токен для обновления Bearer токена"
+    },
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string",
+      "description": "Базовый URL сервера"
+    }
+  ]
+}

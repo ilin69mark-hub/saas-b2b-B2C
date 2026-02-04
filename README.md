@@ -35,7 +35,8 @@ git clone <url-репозитория>
 cd franchise-saas-platform
 
 # 2. Запустите проект через Docker Compose
-docker-compose up --build
+docker compose up --build
+
 
 # Приложение будет доступно по адресам:
 # - Фронтенд: http://localhost:3000
@@ -668,3 +669,18 @@ docker system prune -a
 ---
 
 **Готово!** 🎉 
+
+
+// Logout handles user logout (Заглушка позже реализовать на Redis)
+//func (h *AuthHandler) Logout(c *gin.Context) {
+	// In a real application, you would invalidate the refresh token here
+	//authHeader := c.GetHeader("Authorization")
+	//if authHeader != "" {
+		// Add token to blacklist or mark as invalid
+	//	_ = h.service.InvalidateToken(authHeader)
+	//}
+
+	//c.JSON(http.StatusOK, gin.H{
+	//	"message": "Successfully logged out",
+	//})
+//}

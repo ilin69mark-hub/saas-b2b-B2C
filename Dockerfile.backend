@@ -1,36 +1,31 @@
 # Multi-stage build for backend
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
-# Install git for go modules
 RUN apk add --no-cache git
 
 WORKDIR /app
 
-# Copy go mod files
 COPY backend/go.mod backend/go.sum ./
-
-# Download dependencies
 RUN go mod download
 
-# Copy source code
 COPY backend/ .
+COPY config.yaml .
 
-# Build the application
+# Отладка — проверим, что файл есть
+RUN ls -la /app/config.yaml
+RUN cat /app/config.yaml
+
 RUN CGO_ENABLED=0 GOOS=linux go build -o main cmd/server/main.go
 
 # Final stage
 FROM alpine:latest
-
-# Install ca-certificates for HTTPS requests
 RUN apk --no-cache add ca-certificates
 
 WORKDIR /root/
 
-# Copy the binary from builder stage
-COPY --from=builder /app/main .
+# Копируем явно в /root/
+COPY --from=builder /app/main /root/main
+COPY --from=builder /app/config.yaml /root/config.yaml
 
-# Expose port
 EXPOSE 8080
-
-# Run the application
 CMD ["./main"]

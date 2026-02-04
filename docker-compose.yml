@@ -1,4 +1,4 @@
-version: '3.8'
+#version: '3.8'
 
 services:
   # PostgreSQL база данных
@@ -53,7 +53,6 @@ services:
       - DB_USER=postgres
       - DB_PASSWORD=postgres
       - DB_NAME=franchise_db
-      - JWT_SECRET=supersecretkeyfordevelopment_change_in_production
       - REDIS_URL=redis://redis:6379
     depends_on:
       postgres:
