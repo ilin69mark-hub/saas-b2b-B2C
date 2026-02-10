@@ -3,36 +3,38 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files
+# Копируем package.json и package-lock.json
 COPY frontend/package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Устанавливаем ВСЕ зависимости (включая devDependencies для сборки)
+RUN npm ci
 
-# Copy source code
+# Копируем исходный код
 COPY frontend/ .
 
-# Build the application
+# Собираем приложение
 RUN npm run build
 
 # Production stage
-FROM node:18-alpine
+FROM node:18-alpine AS runner
 
 WORKDIR /app
 
-# Copy package files
+# Копируем package.json и package-lock.json
 COPY frontend/package*.json ./
 
-# Install production dependencies only
+# Устанавливаем ТОЛЬКО production-зависимости
 RUN npm ci --only=production && npm cache clean --force
 
-# Copy built application from builder stage
+# Копируем результат сборки
 COPY --from=builder /app/.next ./.next
-#COPY --from=builder /app/public ./public
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/public ./public
 
-# Expose port
+# Экспорт порта
 EXPOSE 3000
 
-# Start the application
+# Рекомендуется передавать через docker run -e "PORT=3000"
+# ENV PORT=3000
+
+# Запуск приложения
 CMD ["npm", "start"]

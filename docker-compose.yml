@@ -1,4 +1,4 @@
-#version: '3.8'
+version: '3.8'
 
 services:
   # PostgreSQL база данных
@@ -7,18 +7,21 @@ services:
     container_name: franchise-postgres
     ports:
       - "5432:5432"
+    env_file:
+      - .env
     environment:
-      - POSTGRES_DB=franchise_db
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 15s
     restart: unless-stopped
     networks:
       - franchise-network
@@ -46,14 +49,17 @@ services:
     container_name: franchise-backend
     ports:
       - "8080:8080"
+    env_file:
+      - .env
     environment:
-      - PORT=8080
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - DB_NAME=franchise_db
-      - REDIS_URL=redis://redis:6379
+      PORT: ${PORT}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_ADDR: redis:6379  # ✅ Исправлено: должно совпадать с viper.GetString("redis_addr")
     depends_on:
       postgres:
         condition: service_healthy
