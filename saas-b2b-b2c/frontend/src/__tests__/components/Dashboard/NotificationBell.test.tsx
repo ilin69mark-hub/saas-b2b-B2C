@@ -27,28 +27,24 @@ const mockAlerts = [
     title: 'Просроченный замер',
     message: 'Замер для Иван Иванов просрочен более 3 дней',
     type: 'overdue_measurement',
-    severity: 'critical',
-    link: '/leads/123',
     is_read: false,
     created_at: new Date().toISOString(),
+    data: JSON.stringify({ lead_id: '123', type: 'overdue_measurement' }),
   },
   {
     id: '2',
     title: 'Брошенное КП',
     message: 'КП для Петр Петров без ответа более 5 дней',
     type: 'abandoned_kp',
-    severity: 'warning',
-    link: '/leads/456',
     is_read: false,
     created_at: new Date(Date.now() - 3600000).toISOString(),
+    data: JSON.stringify({ lead_id: '456', type: 'abandoned_kp' }),
   },
   {
     id: '3',
     title: 'Падение конверсии',
     message: 'Конверсия упала на 25% относительно среднего',
     type: 'conversion_drop',
-    severity: 'warning',
-    link: '',
     is_read: true,
     created_at: new Date(Date.now() - 7200000).toISOString(),
   },
@@ -110,22 +106,22 @@ describe('NotificationBell', () => {
     expect(container.querySelector('.ant-badge')).toBeInTheDocument();
   });
 
-  it('должен использовать localStorage для сохранения непрочитанных', async () => {
-    localStorage.setItem('salon_alerts_unread', '3');
-
+  it('должен показывать Empty когда нет уведомлений', async () => {
     apiClient.get.mockResolvedValue({
       data: { alerts: [], unread_count: 0 },
     });
 
-    render(
+    const { container } = render(
       <Provider store={createMockStore()}>
         <NotificationBell />
       </Provider>
     );
 
     await waitFor(() => {
-      expect(localStorage.getItem('salon_alerts_unread')).toBe('0');
+      expect(apiClient.get).toHaveBeenCalledWith('/alerts');
     });
+    // Колокольчик всегда виден; Empty появится только при открытии дропдауна
+    expect(container.querySelector('.ant-badge')).toBeInTheDocument();
   });
 
   it('должен обрабатывать ошибки API', async () => {

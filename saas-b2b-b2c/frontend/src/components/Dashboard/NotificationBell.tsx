@@ -1,178 +1,97 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Badge, Dropdown, List, Button, Spin, Empty, Tag, Tooltip, message } from 'antd';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Badge, Dropdown, List, Button, Spin, Empty, Tag, Tooltip } from 'antd';
 import { BellOutlined, WarningOutlined, ExclamationCircleOutlined, InfoCircleOutlined, CloseOutlined, LinkOutlined } from '@ant-design/icons';
 import apiClient from '@/api/axiosClient';
+import { useThemeMode } from '@/components/ThemeProvider';
+import { useRouter } from 'next/router';
 
-interface AlertItem {
+interface Notification {
   id: string;
   title: string;
   message: string;
   type: string;
-  severity: string;
-  link: string;
   is_read: boolean;
   created_at: string;
   data?: string;
+  tenant_id?: string;
+  user_id?: string | null;
 }
 
+type Severity = 'critical' | 'warning' | 'info';
+
+const TYPE_META: Record<string, { label: string; severity: Severity }> = {
+  payment:     { label: 'Платёж',     severity: 'warning' },
+  system:      { label: 'Система',     severity: 'info' },
+  maintenance: { label: 'Техработы',  severity: 'warning' },
+  overdue_measurement: { label: 'Замер',     severity: 'critical' },
+  abandoned_kp:        { label: 'КП',        severity: 'warning' },
+  conversion_drop:     { label: 'Конверсия', severity: 'critical' },
+  traffic_drop:        { label: 'Трафик',    severity: 'warning' },
+  dealer_no_orders:    { label: 'Заказы',    severity: 'warning' },
+  dealer_new_salon:    { label: 'Салон',     severity: 'info' },
+  dealer_no_reports:   { label: 'Отчёты',    severity: 'warning' },
+  dealer_no_salons:    { label: 'Салоны',    severity: 'critical' },
+  territory_weekly_summary: { label: 'Сводка', severity: 'info' },
+};
+
+const POLL_INTERVAL = 2 * 60 * 1000;
+
 const NotificationBell: React.FC = () => {
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+  const { theme: themeName } = useThemeMode();
+  const isDark = themeName === 'dark';
+
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const wsRef = useRef<WebSocket | null>(null);
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const STORAGE_KEY = 'salon_alerts_unread';
-  const POLL_INTERVAL = 2 * 60 * 1000; // 2 минуты
+  const ddBg = isDark ? '#1f1f1f' : '#fff';
+  const ddBorder = isDark ? '#303030' : '#f0f0f0';
+  const textSecondary = isDark ? '#888' : '#999';
+  const itemBgRead = isDark ? '#262626' : '#fff';
+  const itemBgUnread = isDark ? '#3a2a14' : '#fff7e6';
 
-  // Загрузка сохраненных непрочитанных из localStorage
-  const loadSavedUnread = useCallback(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const count = parseInt(saved, 10);
-        if (!isNaN(count)) {
-          setUnreadCount(count);
-        }
-      }
-    } catch (e) {
-      console.error('Error loading saved alerts', e);
-    }
-  }, []);
-
-  // Сохранение непрочитанных в localStorage
-  const saveUnread = useCallback((count: number) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, count.toString());
-    } catch (e) {
-      console.error('Error saving alerts', e);
-    }
-  }, []);
-
-  // Загрузка алертов с API
   const fetchAlerts = useCallback(async () => {
     try {
       setLoading(true);
       const res = await apiClient.get('/alerts');
-      const alertsData = res.data.alerts || [];
-      const count = res.data.unread_count || 0;
-
-      setAlerts(alertsData);
-      setUnreadCount(count);
-      saveUnread(count);
+      const data = res.data || {};
+      setNotifications(Array.isArray(data.alerts) ? data.alerts : []);
+      setUnreadCount(data.unread_count || 0);
     } catch (e) {
-      console.error('Error fetching alerts', e);
+      console.error('Error fetching alerts:', e);
     } finally {
       setLoading(false);
     }
-  }, [saveUnread]);
-
-  // Инициализация WebSocket
-  const initWebSocket = useCallback(() => {
-    const userId = localStorage.getItem('userId') || localStorage.getItem('user_id');
-    if (!userId) return;
-
-    const wsUrl = `ws://${window.location.host}/ws/alerts?user_id=${userId}`;
-
-    try {
-      const ws = new WebSocket(wsUrl);
-
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'alert') {
-            const newAlert: AlertItem = {
-              id: data.data.id || Date.now().toString(),
-              title: data.data.title || 'Новый алерт',
-              message: data.data.description || '',
-              type: data.data.type || 'info',
-              severity: data.data.severity || 'info',
-              link: data.data.link || '',
-              is_read: false,
-              created_at: new Date().toISOString(),
-            };
-
-            setAlerts(prev => [newAlert, ...prev]);
-            setUnreadCount(prev => {
-              const newCount = prev + 1;
-              saveUnread(newCount);
-              return newCount;
-            });
-            message.info(newAlert.title);
-          }
-        } catch (e) {
-          console.error('Error parsing WS message', e);
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error('WebSocket error', error);
-      };
-
-      ws.onclose = () => {
-        console.log('WebSocket disconnected, falling back to polling');
-        startPolling();
-      };
-
-      wsRef.current = ws;
-    } catch (e) {
-      console.error('WebSocket init error', e);
-      startPolling();
-    }
-  }, [saveUnread]);
-
-  // Polling fallback
-  const startPolling = useCallback(() => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-    }
-
-    pollingRef.current = setInterval(() => {
-      fetchAlerts();
-    }, POLL_INTERVAL);
-
-    fetchAlerts();
-  }, [fetchAlerts]);
+  }, []);
 
   useEffect(() => {
-    loadSavedUnread();
     fetchAlerts();
-
-    // Пробуем WebSocket, если не работает - будет polling
-    initWebSocket();
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
-    };
-  }, [loadSavedUnread, fetchAlerts, initWebSocket]);
+    const id = setInterval(fetchAlerts, POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, [fetchAlerts]);
 
   const handleMarkRead = async (alertId: string) => {
     try {
       await apiClient.patch(`/alerts/${alertId}/read`);
-
-      setAlerts(prev =>
+      setNotifications(prev =>
         prev.map(a => (a.id === alertId ? { ...a, is_read: true } : a))
       );
-      setUnreadCount(prev => {
-        const newCount = Math.max(0, prev - 1);
-        saveUnread(newCount);
-        return newCount;
-      });
+      setUnreadCount(prev => Math.max(0, prev - 1));
     } catch (e) {
-      console.error('Error marking alert as read', e);
+      console.error('Error marking alert as read:', e);
     }
   };
 
-  const getSeverityColor = (severity: string) => {
+  const handleMarkAllRead = async () => {
+    const unread = notifications.filter(n => !n.is_read);
+    await Promise.all(unread.map(n => handleMarkRead(n.id)));
+  };
+
+  const getTypeMeta = (type: string) =>
+    TYPE_META[type] || { label: type || 'Уведомление', severity: 'info' as Severity };
+
+  const getSeverityColor = (severity: Severity) => {
     switch (severity) {
       case 'critical': return '#ff4d4f';
       case 'warning': return '#faad14';
@@ -180,7 +99,7 @@ const NotificationBell: React.FC = () => {
     }
   };
 
-  const getSeverityIcon = (severity: string) => {
+  const getSeverityIcon = (severity: Severity) => {
     switch (severity) {
       case 'critical': return <WarningOutlined style={{ color: '#ff4d4f' }} />;
       case 'warning': return <ExclamationCircleOutlined style={{ color: '#faad14' }} />;
@@ -188,14 +107,17 @@ const NotificationBell: React.FC = () => {
     }
   };
 
-  const getTypeLabel = (type: string) => {
-    const types: Record<string, string> = {
-      overdue_measurement: 'Просроченный замер',
-      abandoned_kp: 'Брошенное КП',
-      conversion_drop: 'Падение конверсии',
-      traffic_drop: 'Падение трафика',
-    };
-    return types[type] || type;
+  const parseLink = (data?: string): string | undefined => {
+    if (!data) return undefined;
+    try {
+      const p = JSON.parse(data);
+      if (p.link) return p.link;
+      if (p.dealer_id) return `/dealer/${p.dealer_id}`;
+      if (p.lead_id) return `/leads/${p.lead_id}`;
+    } catch {
+      return undefined;
+    }
+    return undefined;
   };
 
   const formatTime = (dateStr: string) => {
@@ -210,103 +132,124 @@ const NotificationBell: React.FC = () => {
     return date.toLocaleDateString('ru-RU');
   };
 
-  const getAlertItem = (item: AlertItem) => (
-    <List.Item
-      style={{
-        padding: '12px',
-        background: item.is_read ? '#fff' : '#fff7e6',
-        borderLeft: item.severity === 'critical' ? '3px solid #ff4d4f' :
-                    item.severity === 'warning' ? '3px solid #faad14' : '3px solid #1890ff',
-        opacity: item.is_read ? 0.6 : 1,
-      }}
-    >
-      <List.Item.Meta
-        avatar={getSeverityIcon(item.severity)}
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Text strong>{item.title}</Text>
-            <Tag color={item.severity === 'critical' ? 'error' : item.severity === 'warning' ? 'warning' : 'blue'}>
-              {getTypeLabel(item.type)}
-            </Tag>
-          </div>
-        }
-        description={
-          <div>
-            <div>{item.message}</div>
-            <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>
-              {formatTime(item.created_at)}
+  const renderItem = (item: Notification) => {
+    const meta = getTypeMeta(item.type);
+    const link = parseLink(item.data);
+    return (
+      <List.Item
+        style={{
+          padding: '12px',
+          background: item.is_read ? itemBgRead : itemBgUnread,
+          borderLeft: `3px solid ${getSeverityColor(meta.severity)}`,
+          opacity: item.is_read ? 0.6 : 1,
+        }}
+      >
+        <List.Item.Meta
+          avatar={getSeverityIcon(meta.severity)}
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>{item.title}</span>
+              <Tag color={meta.severity === 'critical' ? 'error' : meta.severity === 'warning' ? 'warning' : 'blue'}>
+                {meta.label}
+              </Tag>
             </div>
-          </div>
-        }
-      />
-      <div style={{ display: 'flex', gap: 8 }}>
-        {item.link && (
-          <Tooltip title="Перейти">
-            <Button
-              size="small"
-              icon={<LinkOutlined />}
-              onClick={() => window.location.href = item.link}
-            />
-          </Tooltip>
-        )}
-        {!item.is_read && (
-          <Tooltip title="Закрыть">
-            <Button
-              size="small"
-              icon={<CloseOutlined />}
-              onClick={() => handleMarkRead(item.id)}
-            />
-          </Tooltip>
-        )}
-      </div>
-    </List.Item>
-  );
+          }
+          description={
+            <div>
+              <div>{item.message}</div>
+              <div style={{ fontSize: 11, color: textSecondary, marginTop: 4 }}>
+                {formatTime(item.created_at)}
+              </div>
+            </div>
+          }
+        />
+        <div style={{ display: 'flex', gap: 8 }}>
+          {link && (
+            <Tooltip title="Перейти">
+              <Button
+                size="small"
+                icon={<LinkOutlined />}
+                onClick={() => router.push(link)}
+              />
+            </Tooltip>
+          )}
+          {!item.is_read && (
+            <Tooltip title="Закрыть">
+              <Button
+                size="small"
+                icon={<CloseOutlined />}
+                onClick={() => handleMarkRead(item.id)}
+              />
+            </Tooltip>
+          )}
+        </div>
+      </List.Item>
+    );
+  };
 
   const dropdownContent = (
-    <div style={{ width: 360, maxHeight: 500, overflowY: 'auto', background: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', borderRadius: 8 }}>
-      <div style={{ padding: '12px 16px', fontWeight: 'bold', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between' }}>
-        <span>Алерты</span>
-        <Tag color="red">{unreadCount}</Tag>
+    <div
+      style={{
+        width: 360,
+        maxHeight: 500,
+        overflowY: 'auto',
+        background: ddBg,
+        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        borderRadius: 8,
+        color: isDark ? '#e5e5e5' : undefined,
+      }}
+    >
+      <div
+        style={{
+          padding: '12px 16px',
+          fontWeight: 'bold',
+          borderBottom: `1px solid ${ddBorder}`,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <span>Уведомления</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {unreadCount > 0 && (
+            <Button size="small" type="link" onClick={handleMarkAllRead}>
+              Прочитать все
+            </Button>
+          )}
+          <Tag color="red">{unreadCount}</Tag>
+        </div>
       </div>
       {loading ? (
-        <div style={{ padding: 40, textAlign: 'center' }}><Spin /></div>
-      ) : alerts.length === 0 ? (
-        <Empty description="Нет алертов" style={{ padding: 40 }} />
+        <div style={{ padding: 40, textAlign: 'center' }}>
+          <Spin />
+        </div>
+      ) : notifications.length === 0 ? (
+        <Empty description="Нет уведомлений" style={{ padding: 40 }} />
       ) : (
-        <List
-          dataSource={alerts}
-          renderItem={getAlertItem}
-        />
+        <List dataSource={notifications} renderItem={renderItem} />
       )}
     </div>
   );
 
   return (
     <Dropdown
-      menu={{ items: [] }}
-      popupRender={() => (
-        <div style={{ width: 360, maxHeight: 500, overflowY: 'auto', background: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', borderRadius: 8 }}>
-          <div style={{ padding: '12px 16px', fontWeight: 'bold', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between' }}>
-            <span>Алерты</span>
-            <Tag color="red">{unreadCount}</Tag>
-          </div>
-          {loading ? (
-            <div style={{ padding: 40, textAlign: 'center' }}><Spin /></div>
-          ) : alerts.length === 0 ? (
-            <Empty description="Нет алертов" style={{ padding: 40 }} />
-          ) : (
-            <List
-              dataSource={alerts}
-              renderItem={getAlertItem}
-            />
-          )}
-        </div>
-      )}
+      popupRender={() => dropdownContent}
       trigger={['click']}
       placement="bottomRight"
     >
-      <Badge count={unreadCount} size="small" style={{ cursor: 'pointer', backgroundColor: unreadCount > 0 ? '#ff4d4f' : undefined }}>
-        <BellOutlined style={{ fontSize: '18px', cursor: 'pointer', color: unreadCount > 0 ? '#ff4d4f' : undefined }} />
+      <Badge
+        count={unreadCount}
+        size="small"
+        offset={[-10, -8]}
+        style={{ cursor: 'pointer', backgroundColor: unreadCount > 0 ? '#ff4d4f' : undefined }}
+      >
+        <BellOutlined
+          style={{
+            fontSize: 18,
+            cursor: 'pointer',
+            color: unreadCount > 0 ? '#ff4d4f' : undefined,
+          }}
+        />
       </Badge>
     </Dropdown>
   );

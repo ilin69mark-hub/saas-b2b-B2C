@@ -22,4 +22,22 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
+// Автоматический logout при 401 (пользователь удалён или токен протух)
+// Не срабатывает на /auth/login и /auth/register (неверный пароль и т.п.)
+apiClient.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    const isAuthEndpoint = err.config?.url?.startsWith('/auth/');
+    if (err.response?.status === 401 && !isAuthEndpoint && typeof window !== 'undefined') {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('user');
+      localStorage.removeItem('id');
+      localStorage.removeItem('role');
+      localStorage.removeItem('reduxState');
+      window.location.href = '/login';
+    }
+    return Promise.reject(err);
+  },
+);
+
 export default apiClient;

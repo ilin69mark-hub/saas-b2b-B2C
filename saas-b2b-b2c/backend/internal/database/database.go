@@ -70,6 +70,12 @@ func runMigrations(db *gorm.DB) error {
 		migrateGoals,
 		migrateReports,
 		migrateManagerPlans,
+		migrateNormalizePhones,
+		migrateTerritoryDeviations,
+		migrateTerritoryInteractions,
+		migrateDealerExpenses,
+		migrateUnitTemplates,
+		migrateProductInventory,
 	}
 
 	for _, m := range migrations {
@@ -192,7 +198,7 @@ func migrateOrders(db *gorm.DB) error {
 }
 
 func migrateTasks(db *gorm.DB) error {
-	return db.Exec(`
+	if err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS tasks (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			user_id UUID,
@@ -204,7 +210,20 @@ func migrateTasks(db *gorm.DB) error {
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
-	`).Error
+	`).Error; err != nil {
+		return err
+	}
+	for _, col := range []string{
+		"ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to UUID",
+		"ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_by UUID",
+		"ALTER TABLE tasks ADD COLUMN IF NOT EXISTS salon_id UUID",
+		"ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+	} {
+		if err := db.Exec(col).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func migrateChecklists(db *gorm.DB) error {
@@ -420,6 +439,112 @@ func migrateManagerPlans(db *gorm.DB) error {
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(manager_id, month)
+		)
+	`).Error
+}
+
+// migrateNormalizePhones приводит существующие телефоны к каноническому
+// формату +7XXXXXXXXXX. Идемпотентно: уже нормализованные строки пропускаются.
+//
+// Поддерживаемые варианты на входе:
+//   8XXXXXXXXXX, 7XXXXXXXXXX, +7XXXXXXXXXX, +7(XXX)-XXX-XX-XX
+//
+// Применяется к колонкам: users.phone, users.contacts_phone, leads.phone.
+func migrateNormalizePhones(db *gorm.DB) error {
+	stmts := []string{
+		`UPDATE users SET phone = '+7' || substring(regexp_replace(phone, '\D', '', 'g') FROM 2 FOR 10)
+		 WHERE phone IS NOT NULL AND phone <> ''
+		   AND regexp_replace(phone, '\D', '', 'g') ~ '^[87]?\d{10}$'
+		   AND phone !~ '^\+7\d{10}$'`,
+		`UPDATE users SET contacts_phone = '+7' || substring(regexp_replace(contacts_phone, '\D', '', 'g') FROM 2 FOR 10)
+		 WHERE contacts_phone IS NOT NULL AND contacts_phone <> ''
+		   AND regexp_replace(contacts_phone, '\D', '', 'g') ~ '^[87]?\d{10}$'
+		   AND contacts_phone !~ '^\+7\d{10}$'`,
+		`UPDATE leads SET phone = '+7' || substring(regexp_replace(phone, '\D', '', 'g') FROM 2 FOR 10)
+		 WHERE phone IS NOT NULL AND phone <> ''
+		   AND regexp_replace(phone, '\D', '', 'g') ~ '^[87]?\d{10}$'
+		   AND phone !~ '^\+7\d{10}$'`,
+	}
+	for _, s := range stmts {
+		if err := db.Exec(s).Error; err != nil {
+			return fmt.Errorf("normalize phones: %w", err)
+		}
+	}
+	return nil
+}
+
+func migrateTerritoryDeviations(db *gorm.DB) error {
+	return db.Exec(`
+		CREATE TABLE IF NOT EXISTS territory_deviations (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			dealer_id UUID NOT NULL,
+			period VARCHAR(20) NOT NULL,
+			reason TEXT DEFAULT '',
+			actions TEXT DEFAULT '',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(dealer_id, period)
+		)
+	`).Error
+}
+
+func migrateTerritoryInteractions(db *gorm.DB) error {
+	return db.Exec(`
+		CREATE TABLE IF NOT EXISTS territory_interactions (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			dealer_id UUID NOT NULL,
+			type VARCHAR(50) NOT NULL,
+			description TEXT DEFAULT '',
+			result TEXT DEFAULT '',
+			created_by UUID,
+			date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`).Error
+}
+
+func migrateDealerExpenses(db *gorm.DB) error {
+	return db.Exec(`
+		CREATE TABLE IF NOT EXISTS dealer_expenses (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			dealer_id UUID NOT NULL,
+			period VARCHAR(7) NOT NULL,
+			category VARCHAR(50) NOT NULL,
+			amount NUMERIC(15,2) DEFAULT 0,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(dealer_id, period, category)
+		)
+	`).Error
+}
+
+func migrateUnitTemplates(db *gorm.DB) error {
+	return db.Exec(`
+		CREATE TABLE IF NOT EXISTS unit_templates (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			dealer_id UUID NOT NULL,
+			name VARCHAR(255) NOT NULL,
+			category VARCHAR(50) NOT NULL DEFAULT 'other',
+			input JSONB NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`).Error
+}
+
+func migrateProductInventory(db *gorm.DB) error {
+	return db.Exec(`
+		CREATE TABLE IF NOT EXISTS product_inventory (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			salon_id UUID NOT NULL,
+			collection VARCHAR(255) NOT NULL,
+			category VARCHAR(100) NOT NULL DEFAULT '',
+			stock_warehouse INT NOT NULL DEFAULT 0,
+			on_display INT NOT NULL DEFAULT 0,
+			sold_period INT NOT NULL DEFAULT 0,
+			turnover_days INT NOT NULL DEFAULT 0,
+			total_stock_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
 	`).Error
 }

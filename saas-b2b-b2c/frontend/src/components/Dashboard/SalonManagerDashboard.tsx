@@ -1,11 +1,13 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { Layout, Row, Col, Card, Typography, Badge, Tabs, Spin, Statistic } from 'antd';
-import { ShopOutlined, DollarOutlined, PercentageOutlined, GiftOutlined, BellOutlined } from '@ant-design/icons';
+import { Layout, Row, Col, Card, Typography, Tabs, Spin, Statistic } from 'antd';
+import { ShopOutlined, DollarOutlined, PercentageOutlined, GiftOutlined, SunOutlined, MoonOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import 'dayjs/locale/ru';
 import apiClient from '@/api/axiosClient';
 import NotificationBell from './NotificationBell';
 import DealerDirectives from './DealerDirectives';
+import UserMenu from './UserMenu';
+import { useThemeMode } from '@/components/ThemeProvider';
 
 dayjs.locale('ru');
 
@@ -59,6 +61,12 @@ const SalonManagerDashboard: React.FC<SalonManagerDashboardProps> = ({ user, tit
     return () => clearInterval(interval);
   }, []);
 
+  const { theme: themeName, toggleTheme } = useThemeMode();
+  const isDark = themeName === 'dark';
+  const headerStyle = isDark
+    ? { background: '#1f1f1f', borderBottom: '1px solid #303030' }
+    : { background: '#fff', borderBottom: '1px solid #f0f0f0' };
+
   const getPlanColor = (percent: number) => {
     if (percent >= 80) return '#52c41a';
     if (percent >= 50) return '#faad14';
@@ -86,14 +94,13 @@ const SalonManagerDashboard: React.FC<SalonManagerDashboardProps> = ({ user, tit
   };
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#f0f2f5' }}>
+    <Layout style={{ minHeight: '100vh', background: isDark ? '#141414' : '#f0f2f5' }}>
       <Header style={{
-        background: '#fff',
+        ...headerStyle,
         padding: '0 24px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        borderBottom: '1px solid #f0f0f0',
         position: 'sticky',
         top: 0,
         zIndex: 100,
@@ -141,6 +148,15 @@ const SalonManagerDashboard: React.FC<SalonManagerDashboardProps> = ({ user, tit
 
           <DealerDirectives user={user} />
           <NotificationBell />
+          <span
+            onClick={toggleTheme}
+            role="button"
+            aria-label="Переключить тему"
+            style={{ cursor: 'pointer', fontSize: 18, color: isDark ? '#fff' : undefined }}
+          >
+            {isDark ? <SunOutlined /> : <MoonOutlined />}
+          </span>
+          <UserMenu user={user} />
         </div>
       </Header>
 

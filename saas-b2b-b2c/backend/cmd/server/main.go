@@ -17,6 +17,7 @@ import (
 	"franchise-saas-backend/internal/middleware"
 	"franchise-saas-backend/internal/repository"
 	"franchise-saas-backend/internal/services"
+	"franchise-saas-backend/internal/validation"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
@@ -93,6 +94,10 @@ func main() {
 	r := gin.Default()
 	r.Use(middleware.CORS())
 
+	if err := validation.RegisterValidators(); err != nil {
+		log.Printf("Warning: failed to register custom validators: %v", err)
+	}
+
 	r.GET("/health", func(c *gin.Context) {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
@@ -111,7 +116,7 @@ func main() {
 	r.GET("/api/docs", docs.SwaggerHandler)
 
 	api := r.Group("/api/v1")
-	api.Use(middleware.RateLimit(100, time.Minute))
+	api.Use(middleware.RateLimit(500, time.Minute))
 	{
 		api.GET("/health", func(c *gin.Context) {
 			c.JSON(200, gin.H{"status": "ok", "timestamp": time.Now().Format(time.RFC3339)})
@@ -160,8 +165,11 @@ func main() {
 		// Dashboard Dealer
 		protected.GET("/dealer/summary", kpiHandler.GetDealerSummary)
 		protected.GET("/dealer/finance", kpiHandler.GetDealerFinance)
+		protected.GET("/dealer/expenses", kpiHandler.GetDealerExpenses)
+		protected.POST("/dealer/expenses", kpiHandler.SaveDealerExpenses)
 		protected.GET("/dealer/funnel", kpiHandler.GetDealerFunnel)
 		protected.GET("/dealer/products", kpiHandler.GetDealerProducts)
+		protected.GET("/dealer/products/export", kpiHandler.GetDealerProductsExport)
 		protected.GET("/dealer/tasks", kpiHandler.GetDealerTasks)
 		protected.PATCH("/dealer/tasks/:id", kpiHandler.UpdateDealerTask)
 		protected.GET("/dealer/requests", kpiHandler.GetDealerRequests)
@@ -170,6 +178,9 @@ func main() {
 		protected.GET("/dealer/alerts", kpiHandler.GetDealerAlerts)
 		protected.PATCH("/dealer/alerts/:id/read", kpiHandler.MarkDealerAlertRead)
 		protected.PATCH("/dealer/alerts/read-all", kpiHandler.MarkAllDealerAlertsRead)
+		protected.GET("/dealer/unit-templates", kpiHandler.GetUnitTemplates)
+		protected.POST("/dealer/unit-templates", kpiHandler.CreateUnitTemplate)
+		protected.DELETE("/dealer/unit-templates/:id", kpiHandler.DeleteUnitTemplate)
 
 		// Dashboard Franchiser
 		protected.GET("/franchiser/summary", kpiHandler.GetFranchiserSummary)
@@ -183,6 +194,7 @@ func main() {
 		protected.POST("/franchiser/team/plans", kpiHandler.SetManagerPlans)
 		protected.GET("/franchiser/team/plans", kpiHandler.GetManagerPlans)
 		protected.GET("/franchiser/dealers", kpiHandler.GetFranchiserDealers)
+		protected.GET("/franchiser/dealers/:id/details", kpiHandler.GetDealerDetails)
 		protected.GET("/franchiser/dealers/health", kpiHandler.GetDealersHealth)
 		protected.GET("/franchiser/dealers/migration", kpiHandler.GetDealersMigration)
 		protected.GET("/franchiser/dealers/system-issues", kpiHandler.GetSystemIssues)
@@ -209,7 +221,11 @@ func main() {
 		protected.GET("/territory/summary", kpiHandler.GetTerritorySummary)
 		protected.GET("/territory/funnel", kpiHandler.GetTerritoryFunnel)
 		protected.GET("/territory/planfact", kpiHandler.GetTerritoryPlanFact)
+		protected.GET("/territory/planfact/pdf", kpiHandler.GetTerritoryPlanFactPDF)
+		protected.PUT("/territory/planfact/deviation", kpiHandler.UpdateTerritoryDeviation)
 		protected.GET("/territory/communications", kpiHandler.GetTerritoryCommunications)
+		protected.POST("/territory/tasks", kpiHandler.CreateTerritoryTask)
+		protected.POST("/territory/interactions", kpiHandler.CreateTerritoryInteraction)
 		protected.GET("/territory/benchmarks", kpiHandler.GetTerritoryBenchmarks)
 
 		protected.GET("/stats/team/analytics", kpiHandler.GetTeamAnalytics)

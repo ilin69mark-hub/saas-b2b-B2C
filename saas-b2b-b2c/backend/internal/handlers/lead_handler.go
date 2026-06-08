@@ -111,7 +111,7 @@ func (h *LeadHandler) UpdateLeadStatus(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.UpdateStatus(c.Request.Context(), currentUser.ID, leadID, req.Status); err != nil {
+	if err := h.service.UpdateStatus(c.Request.Context(), currentUser.ID, leadID, req.Status, req.DisqualifyReason); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

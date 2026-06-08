@@ -137,7 +137,7 @@ func ResetAndSeedData(db *gorm.DB) error {
 		"messages", "schedule_events", "daily_goals", "orders", "goals",
 		"task_reports", "tasks", "dealer_expenses", "dealer_requests",
 		"dealer_tasks", "invoices", "lead_activities", "leads",
-		"marketing_budgets", "user_logs", "benchmarks",
+		"marketing_budgets", "user_logs", "benchmarks", "unit_templates",
 	}
 	for _, t := range tables {
 		db.Exec("DELETE FROM " + t)
@@ -343,7 +343,25 @@ func ResetAndSeedData(db *gorm.DB) error {
 	}
 	log.Printf("Goals created: %d", goalCount)
 
-	// 8. Create orders for each salon (a few per month, Jan 2025 - current)
+	// 8. Create orders for each salon (Jan 2025 - current)
+	orderProducts := []struct {
+		collection string
+		category   string
+	}{
+		{"Кухня «Модерн»", "Кухни"},
+		{"Кухня «Классика»", "Кухни"},
+		{"Кухня «Лофт»", "Кухни"},
+		{"Диван «Комфорт»", "Мягкая"},
+		{"Диван «Престиж»", "Мягкая"},
+		{"Кресло «Эко»", "Мягкая"},
+		{"Шкаф «Гармония»", "Корпусная"},
+		{"Стенка «Практик»", "Корпусная"},
+		{"Стол «Стиль»", "Корпусная"},
+		{"Матрас «Ортопед»", "Матрасы"},
+		{"Матрас «Релакс»", "Матрасы"},
+		{"Матрас «Дуо»", "Матрасы"},
+	}
+
 	orderCount := 0
 	for _, s := range salons {
 		var smIDs []string
@@ -353,40 +371,57 @@ func ResetAndSeedData(db *gorm.DB) error {
 		}
 
 		for m := start; m.Before(end); m = m.AddDate(0, 1, 0) {
-			numOrders := 3 + rng.Intn(3)
+			numOrders := 8 + rng.Intn(5)
 			for o := 0; o < numOrders; o++ {
 				createdBy := smIDs[rng.Intn(len(smIDs))]
-				price := roundVal(5000.0 + rng.Float64()*145000.0)
+				price := roundVal(15000.0 + rng.Float64()*135000.0)
 				day := 1 + rng.Intn(28)
 				orderTime := time.Date(m.Year(), m.Month(), day, 10+rng.Intn(12), 0, 0, 0, time.UTC)
-
-				descriptions := []string{
-					"Продажа мебели",
-					"Консультация и заказ",
-					"Покупка аксессуаров",
-					"Оформление договора",
-					"Заказ по каталогу",
-				}
-				desc := descriptions[rng.Intn(len(descriptions))]
+				prod := orderProducts[rng.Intn(len(orderProducts))]
 
 				db.Exec(`INSERT INTO orders (id, salon_id, created_by, status, total_price, description, created_at, updated_at)
 					VALUES ($1, $2, $3, 'paid', $4, $5, $6, $6)`,
-					uuid.New().String(), s.ID, createdBy, price, desc, orderTime)
+					uuid.New().String(), s.ID, createdBy, price, prod.collection, orderTime)
 				orderCount++
 			}
 		}
 	}
 	log.Printf("Orders created: %d", orderCount)
 
-	// 9. Create daily_goals for each dealer (aggregate monthly)
+	// 9. Create daily_goals for each dealer (daily granularity)
 	dgCount := 0
+	// Удаляем старые помесячные планы, чтобы не было дублей
+	for _, d := range dealers {
+		db.Exec(`DELETE FROM daily_goals WHERE user_id = $1`, d.ID)
+	}
 	for _, d := range dealers {
 		for m := start; m.Before(end); m = m.AddDate(0, 1, 0) {
 			monthPlan := roundVal(300000.0 + rng.Float64()*500000.0)
-			db.Exec(`INSERT INTO daily_goals (id, user_id, target_date, sales_plan, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, NOW(), NOW())`,
-				uuid.New().String(), d.ID, m.Format("2006-01-02"), monthPlan)
-			dgCount++
+			daysInMonth := time.Date(m.Year(), m.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
+			workingDays := 0
+			for day := 1; day <= daysInMonth; day++ {
+				dow := time.Date(m.Year(), m.Month(), day, 0, 0, 0, 0, time.UTC).Weekday()
+				if dow != time.Sunday && dow != time.Saturday {
+					workingDays++
+				}
+			}
+			if workingDays == 0 {
+				workingDays = 22
+			}
+			dailyPlan := monthPlan / float64(workingDays)
+			for day := 1; day <= daysInMonth; day++ {
+				dow := time.Date(m.Year(), m.Month(), day, 0, 0, 0, 0, time.UTC).Weekday()
+				if dow == time.Sunday || dow == time.Saturday {
+					continue
+				}
+				variance := 0.7 + rng.Float64()*0.6
+				dayPlan := roundVal(dailyPlan * variance)
+				targetDate := time.Date(m.Year(), m.Month(), day, 0, 0, 0, 0, time.UTC)
+				db.Exec(`INSERT INTO daily_goals (id, user_id, target_date, sales_plan, created_at, updated_at)
+					VALUES ($1, $2, $3, $4, NOW(), NOW())`,
+					uuid.New().String(), d.ID, targetDate, dayPlan)
+				dgCount++
+			}
 		}
 	}
 	log.Printf("Daily goals created: %d", dgCount)
@@ -467,16 +502,374 @@ func ResetAndSeedData(db *gorm.DB) error {
 					orderPrice := roundVal(targetFact / float64(numMonths*numOrders))
 					day := 10 + o*5
 					orderTime := time.Date(monthStart.Year(), monthStart.Month(), day, 12, 0, 0, 0, time.UTC)
+					prod := orderProducts[(mi+o)%len(orderProducts)]
 
 					db.Exec(`INSERT INTO orders (id, salon_id, created_by, status, total_price, description, created_at, updated_at)
 						VALUES ($1, $2, $3, 'paid', $4, $5, $6, $6)`,
-						uuid.New().String(), salonID, createdBy, orderPrice, "Детерминированный заказ", orderTime)
+						uuid.New().String(), salonID, createdBy, orderPrice, prod.collection, orderTime)
 				}
 			}
 
 			log.Printf("  %s %s: plan=%.0f fact=%.0f (ratio=%.2f)", mt.email, q.name, totalPlan, targetFact, q.ratio)
 		}
 	}
+
+	// 11. Create leads for ALL months (Jan 2025 – current) for territory planfact / sales history
+	log.Println("Creating leads for all months...")
+	leadCount := 0
+	currentMonthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+
+	// Собираем менеджеров салонов, чтобы привязывать лиды к ним, а не к дилеру
+	salonMgrIDs := make(map[string][]string)
+	for _, s := range salons {
+		var ids []string
+		db.Table("users").Where("salon_id = ? AND role = 'salon_manager'", s.ID).Select("id").Scan(&ids)
+		if len(ids) > 0 {
+			salonMgrIDs[s.ID] = ids
+		}
+	}
+	pickMgr := func(salonID, fallback string) string {
+		ids := salonMgrIDs[salonID]
+		if len(ids) == 0 {
+			return fallback
+		}
+		return ids[rng.Intn(len(ids))]
+	}
+
+	for m := start; m.Before(end); m = m.AddDate(0, 1, 0) {
+		monthStart := time.Date(m.Year(), m.Month(), 1, 0, 0, 0, 0, time.UTC)
+		monthEnd := time.Date(m.Year(), m.Month()+1, 0, 23, 59, 59, 0, time.UTC)
+		isCurrentMonth := monthStart.Equal(currentMonthStart)
+
+		for _, s := range salons {
+			// Sale-leads из заказов этого месяца
+			var orders []struct {
+				TotalPrice float64
+				CreatedAt  time.Time
+			}
+			db.Table("orders").
+				Where("salon_id = ? AND status = 'paid' AND created_at BETWEEN ? AND ?", s.ID, monthStart, monthEnd).
+				Select("total_price, created_at").
+				Scan(&orders)
+
+			for i, o := range orders {
+				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
+					VALUES (gen_random_uuid(), $1, $2, $3, $4, 'sale', $5, $5)`,
+					s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Клиент %s #%d", s.Name, i+1), o.TotalPrice, o.CreatedAt)
+				leadCount++
+			}
+
+			// Для каждого месяца добавляем new-лиды и open-лиды (для реалистичной конверсии)
+			// Для текущего месяца — побольше, для прошлых — по 1-2
+			var newLeadCount, openLeadCount int
+			if isCurrentMonth {
+				newLeadCount = 2 + rng.Intn(2)
+				openLeadCount = 1 + rng.Intn(3)
+			} else {
+				newLeadCount = rng.Intn(2)
+				openLeadCount = rng.Intn(2)
+			}
+
+			for i := 0; i < newLeadCount; i++ {
+				day := 1 + rng.Intn(28)
+				if isCurrentMonth && now.Day() > 1 {
+					day = 1 + rng.Intn(now.Day())
+				}
+				createdAt := time.Date(m.Year(), m.Month(), day, 10, 0, 0, 0, time.UTC)
+				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
+					VALUES (gen_random_uuid(), $1, $2, $3, $4, 'new', $5, $5)`,
+					s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Новый лид %s", s.Name),
+					roundVal(30000+rng.Float64()*70000), createdAt)
+				leadCount++
+			}
+
+			for i := 0; i < openLeadCount; i++ {
+				status := "contact"
+				if rng.Float32() < 0.5 {
+					status = "meeting"
+				}
+				day := 1 + rng.Intn(28)
+				if isCurrentMonth && now.Day() > 1 {
+					day = 1 + rng.Intn(now.Day())
+				}
+				createdAt := time.Date(m.Year(), m.Month(), day, 11, 0, 0, 0, time.UTC)
+				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
+					VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $6)`,
+					s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Открытый лид %s", s.Name),
+					roundVal(50000+rng.Float64()*100000), status, createdAt)
+				leadCount++
+			}
+		}
+	}
+
+	// Добавляем лиды за последние 7 дней, чтобы "Неделя" отличалась от "Месяц"
+	oneWeekAgo := now.AddDate(0, 0, -7)
+	for _, s := range salons {
+		var weekLeadCount int64
+		db.Table("leads").
+			Where("salon_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", s.ID, []string{"sale", "paid"}, oneWeekAgo, now).
+			Count(&weekLeadCount)
+		if weekLeadCount < 2 {
+			needed := 2 - weekLeadCount
+			for i := int64(0); i < needed; i++ {
+				dayOffset := rng.Intn(7)
+				createdAt := now.AddDate(0, 0, -dayOffset)
+				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
+					VALUES (gen_random_uuid(), $1, $2, $3, $4, 'sale', $5, $5)`,
+					s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Клиент %s (нед.)", s.Name),
+					roundVal(50000+rng.Float64()*150000), createdAt)
+				leadCount++
+			}
+		}
+	}
+
+	// Гарантируем каждому салону хотя бы 1 sale-лид в окне [currentMonthStart, now],
+	// чтобы у всех дилеров был fact > 0 даже в начале месяца
+	for _, s := range salons {
+		var count int64
+		db.Table("leads").
+			Where("salon_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", s.ID, []string{"sale", "paid"}, currentMonthStart, now).
+			Count(&count)
+		if count == 0 {
+			db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
+				VALUES (gen_random_uuid(), $1, $2, $3, $4, 'sale', NOW(), NOW())`,
+				s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Клиент %s", s.Name),
+				roundVal(50000+rng.Float64()*100000))
+			leadCount++
+		}
+	}
+
+	// Гарантируем каждому салону хотя бы 1 open-лид (contact/meeting) для debt
+	for _, s := range salons {
+		var count int64
+		db.Table("leads").
+			Where("salon_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", s.ID, []string{"contact", "meeting"}, currentMonthStart, now).
+			Count(&count)
+		if count == 0 {
+			status := "contact"
+			if rng.Float32() < 0.5 {
+				status = "meeting"
+			}
+			db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
+				VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW(), NOW())`,
+				s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Открытый лид %s", s.Name),
+				roundVal(50000+rng.Float64()*100000), status)
+			leadCount++
+		}
+	}
+
+	log.Printf("Leads created: %d", leadCount)
+
+	// 12. Create dealer_expenses for all months (Jan 2025 – current) for each dealer
+	log.Println("Creating dealer expenses for all months...")
+	expenseCount := 0
+	expenseCategories := []string{"rent", "utilities", "payroll", "taxes", "logistics", "marketing", "defects", "other", "bonus"}
+
+	type expenseRange struct {
+		min float64
+		max float64
+	}
+	expenseRanges := map[string]expenseRange{
+		"rent":       {40000, 180000},
+		"utilities":  {5000, 25000},
+		"payroll":    {60000, 250000},
+		"taxes":      {15000, 60000},
+		"logistics":  {10000, 35000},
+		"marketing":  {5000, 60000},
+		"defects":    {0, 15000},
+		"other":      {0, 20000},
+		"bonus":      {0, 40000},
+	}
+
+	for _, d := range dealers {
+		for m := start; m.Before(end); m = m.AddDate(0, 1, 0) {
+			period := m.Format("2006-01")
+			for _, cat := range expenseCategories {
+				r := expenseRanges[cat]
+				amount := roundVal(r.min + rng.Float64()*(r.max-r.min))
+				if amount == 0 {
+					continue
+				}
+				db.Exec(`INSERT INTO dealer_expenses (dealer_id, period, category, amount)
+					VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+					d.ID, period, cat, amount)
+				expenseCount++
+			}
+		}
+	}
+	log.Printf("Dealer expenses created: %d", expenseCount)
+
+	// 13. Create alerts for each dealer
+	log.Println("Creating alerts for dealers...")
+	alertCount := 0
+	for _, d := range dealers {
+		var dbPlan, dbFact, dbDebt float64
+		db.Table("daily_goals").Where("user_id = ? AND target_date BETWEEN ? AND ?", d.ID, currentMonthStart, now).
+			Select("COALESCE(SUM(sales_plan), 0)").Scan(&dbPlan)
+		db.Table("leads").Where("manager_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", d.ID, []string{"sale", "paid"}, currentMonthStart, now).
+			Select("COALESCE(SUM(budget), 0)").Scan(&dbFact)
+		db.Table("leads").Where("manager_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", d.ID, []string{"contact", "meeting"}, currentMonthStart, now).
+			Select("COALESCE(SUM(budget), 0)").Scan(&dbDebt)
+
+		planPct := 0
+		if dbPlan > 0 {
+			planPct = int((dbFact / dbPlan) * 100)
+		}
+
+		if dbDebt > 50000 {
+			db.Exec(`INSERT INTO alerts (tenant_id, user_id, category, priority, title, description, created_at)
+				VALUES ($1, $2, 'debt', 'critical', 'Просрочка дебиторской задолженности', $3, NOW())`,
+				franchiser.TenantID, d.ID,
+				fmt.Sprintf("Сумма задолженности: %.0f ₽. Требуется немедленное внимание.", dbDebt))
+			alertCount++
+		}
+
+		if planPct < 30 && dbPlan > 0 {
+			db.Exec(`INSERT INTO alerts (tenant_id, user_id, category, priority, title, description, created_at)
+				VALUES ($1, $2, 'plan', 'warning', 'Критическое отставание от плана', $3, NOW() - INTERVAL '6 hours')`,
+				franchiser.TenantID, d.ID,
+				fmt.Sprintf("Выполнение плана: %d%%. Текущий план: %.0f ₽, факт: %.0f ₽.", planPct, dbPlan, dbFact))
+			alertCount++
+		}
+
+		if planPct < 50 {
+			db.Exec(`INSERT INTO alerts (tenant_id, user_id, category, priority, title, description, created_at)
+				VALUES ($1, $2, 'plan', 'warning', 'Выполнение плана ниже 50%%', $3, NOW() - INTERVAL '1 day')`,
+				franchiser.TenantID, d.ID,
+				fmt.Sprintf("План выполнен лишь на %d%%. Рекомендуется активизировать продажи.", planPct))
+			alertCount++
+		}
+
+		db.Exec(`INSERT INTO alerts (tenant_id, user_id, category, priority, title, description, created_at)
+			VALUES ($1, $2, 'info', 'info', 'Еженедельный отчёт готов', $3, NOW() - INTERVAL '2 days')`,
+			franchiser.TenantID, d.ID,
+			fmt.Sprintf("Отчёт за период %s – %s доступен в разделе аналитики.",
+				currentMonthStart.Format("02.01"), now.Format("02.01.2006")))
+		alertCount++
+	}
+	log.Printf("Alerts created: %d", alertCount)
+
+	// 14. Create tasks for each dealer (recent + historical)
+	log.Println("Creating tasks for dealers...")
+	taskCount := 0
+	taskTemplates := []struct {
+		title       string
+		status      string
+		daysAgo     int
+		dueDaysDiff int // due_date = created_at + dueDaysDiff дней
+	}{
+		{"Оформить витрину по новому планшету", "pending", 2, 7},
+		{"Обновить ценники на коллекцию", "done", 30, -2},
+		{"Провести обучение продавцов", "in_progress", 3, 14},
+		{"Предоставить отчёт по остаткам", "overdue", 45, -10},
+		{"Провести инвентаризацию склада", "pending", 1, 5},
+		{"Подготовить отчёт по продажам за месяц", "done", 60, -5},
+		{"Согласовать рекламный бюджет", "overdue", 90, -20},
+		{"Сдать ежеквартальный отчёт", "overdue", 60, -15},
+		{"Обновить фотографии товаров", "done", 15, -1},
+		{"Утвердить план закупок", "done", 5, 2},
+	}
+	for _, d := range dealers {
+		for _, tmpl := range taskTemplates {
+			createdAt := now.AddDate(0, 0, -tmpl.daysAgo)
+			dueDate := createdAt.AddDate(0, 0, tmpl.dueDaysDiff)
+			db.Exec(`INSERT INTO tasks (id, assigned_to, created_by, title, status, due_date, created_at, updated_at)
+				VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $6)`,
+				d.ID, d.ManagerID, tmpl.title, tmpl.status, dueDate, createdAt)
+			taskCount++
+		}
+	}
+	log.Printf("Tasks created: %d", taskCount)
+
+	// 15. Seed product_inventory for each salon
+	log.Println("Seeding product inventory...")
+	invCount := 0
+	for _, s := range salons {
+		// 3-5 продуктов на салон
+		numInv := 3 + rng.Intn(3)
+		perm := rng.Perm(len(orderProducts))
+		deficitAdded := false
+		nonLiquidAdded := false
+		for i := 0; i < numInv && i < len(perm); i++ {
+			p := orderProducts[perm[i]]
+			stockWH := 1 + rng.Intn(15)
+			onDisp := 1 + rng.Intn(5)
+			sold := 1 + rng.Intn(10)
+			price := 15000.0 + rng.Float64()*135000.0
+			turnover := 20 + rng.Intn(80)
+
+			// Первый товар — дефицит (0 на складе, но был спрос)
+			if !deficitAdded {
+				stockWH = 0
+				onDisp = 0
+				sold = 3 + rng.Intn(5)
+				turnover = 0
+				deficitAdded = true
+			}
+
+			// Второй товар — не-ликвид (> 90 дней, нет продаж)
+			if !nonLiquidAdded && i > 0 {
+				stockWH = 10 + rng.Intn(10)
+				onDisp = 2 + rng.Intn(3)
+				sold = 0
+				turnover = 95 + rng.Intn(30)
+				nonLiquidAdded = true
+			}
+
+			totalVal := float64(stockWH+onDisp) * price
+			db.Exec(`INSERT INTO product_inventory
+				(id, salon_id, collection, category, stock_warehouse, on_display, sold_period, turnover_days, total_stock_value, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())`,
+				uuid.New().String(), s.ID, p.collection, p.category, stockWH, onDisp, sold, turnover, totalVal)
+			invCount++
+		}
+	}
+	log.Printf("Product inventory records created: %d", invCount)
+
+	// 16. Create notifications for managers (unread)
+	log.Println("Creating notifications...")
+	notifCount := 0
+	notifTemplates := []struct {
+		title   string
+		message string
+		daysAgo int
+	}{
+		{"Новый отчёт", "Еженедельный отчёт по продажам готов", 1},
+		{"Напоминание", "У дилера ИП Вектор просрочена задача", 3},
+		{"Системное уведомление", "Обновление тарифов с 1 июля", 5},
+	}
+	for _, mgr := range managers {
+		for _, tmpl := range notifTemplates {
+			createdAt := now.AddDate(0, 0, -tmpl.daysAgo)
+			db.Exec(`INSERT INTO notifications (user_id, type, title, message, is_read, created_at)
+				VALUES ($1, 'info', $2, $3, FALSE, $4)`,
+				mgr.ID, tmpl.title, tmpl.message, createdAt)
+			notifCount++
+		}
+	}
+
+	// Демо-уведомления для дилеров
+	dealerNotifTemplates := []struct {
+		title   string
+		message string
+		daysAgo int
+		alertType string
+	}{
+		{"Низкий остаток на складе", "Кухня «Модерн» — осталось 2 шт на складе", 0, "system"},
+		{"Новый лид требует внимания", "Клиент Иванов А. запросил КП на диван", 1, "system"},
+		{"Просрочена задача", "Инвентаризация склада просрочена на 3 дня", 2, "system"},
+	}
+	for _, d := range dealers {
+		for _, tmpl := range dealerNotifTemplates {
+			createdAt := now.AddDate(0, 0, -tmpl.daysAgo)
+			data := fmt.Sprintf(`{"dealer_id":"%s"}`, d.ID)
+			db.Exec(`INSERT INTO notifications (user_id, type, title, message, is_read, data, created_at)
+				VALUES ($1, $2, $3, $4, FALSE, $5, $6)`,
+				d.ID, tmpl.alertType, tmpl.title, tmpl.message, data, createdAt)
+			notifCount++
+		}
+	}
+	log.Printf("Notifications created: %d", notifCount)
 
 	log.Println("=== Reset and Seed Data complete ===")
 	return nil

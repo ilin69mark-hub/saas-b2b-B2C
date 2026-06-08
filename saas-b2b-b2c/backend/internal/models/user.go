@@ -74,13 +74,13 @@ type UserRegisterRequest struct {
 	Role      Role   `json:"role"`
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
-	Phone     string `json:"phone"`
+	Phone     string `json:"phone" binding:"omitempty,phone_ru"`
 }
 
 type UserUpdateRequest struct {
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
-	Phone     string `json:"phone"`
+	Phone     string `json:"phone" binding:"omitempty,phone_ru"`
 
 	DisplayName           *string `json:"display_name"`
 	Position              *string `json:"position"`
@@ -90,9 +90,9 @@ type UserUpdateRequest struct {
 	AvailableForQuestions *bool   `json:"available_for_questions"`
 	ContactsEmailVisible  *bool   `json:"contacts_email_visible"`
 	ContactsPhoneVisible  *bool   `json:"contacts_phone_visible"`
-	ContactsPhone         *string `json:"contacts_phone"`
+	ContactsPhone         *string `json:"contacts_phone" binding:"omitempty,phone_ru"`
 	ContactsTelegram      *string `json:"contacts_telegram"`
-	ContactsWhatsApp      *string `json:"contacts_whatsapp"`
+	ContactsWhatsApp      *string `json:"contacts_whatsapp" binding:"omitempty,phone_ru"`
 	ContactsWorkingHours  *string `json:"contacts_working_hours"`
 }
 
@@ -109,7 +109,7 @@ type CreateEmployeeRequest struct {
 	Password  string     `json:"password" binding:"required,min=6"`
 	FirstName string     `json:"first_name" binding:"required"`
 	LastName  string     `json:"last_name"`
-	Phone     string     `json:"phone"`
+	Phone     string     `json:"phone" binding:"omitempty,phone_ru"`
 	Role      Role       `json:"role" binding:"required"`
 	ManagedBy *uuid.UUID `json:"managed_by"`
 	// ДОБАВЛЕНО: Поле для указания ID сети (тенанта).
@@ -120,7 +120,7 @@ type CreateEmployeeRequest struct {
 type UpdateEmployeeRequest struct {
 	FirstName string     `json:"first_name"`
 	LastName  string     `json:"last_name"`
-	Phone     string     `json:"phone"`
+	Phone     string     `json:"phone" binding:"omitempty,phone_ru"`
 	Role      Role       `json:"role"`
 	ManagedBy *uuid.UUID `json:"managed_by"`
 }

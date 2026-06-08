@@ -1,17 +1,14 @@
-// src/components/Dashboard/tabs/FunnelPlanTab.tsx
-import React, { useState, useMemo } from 'react';
-import { Card, Row, Col, Progress, Typography, Table, Tag, Button, Space, Select, Radio, Collapse, Statistic, Empty, Spin } from 'antd';
-import { CheckCircleOutlined, ClockCircleOutlined, SyncOutlined, TrophyOutlined, WarningOutlined } from '@ant-design/icons';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Card, Row, Col, Progress, Typography, Table, Tag, Button, Space, Select, Radio, Collapse, Statistic, Empty, Spin, Alert, DatePicker } from 'antd';
+import { TrophyOutlined, WarningOutlined, ReloadOutlined } from '@ant-design/icons';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import dayjs from 'dayjs';
+import apiClient from '@/api/axiosClient';
+import dayjs, { Dayjs } from 'dayjs';
 
-const { Text, Title } = Typography;
-const { Option } = Select;
-const { Panel } = Collapse;
+const { Text } = Typography;
+const { RangePicker } = DatePicker;
 
-export type PeriodType = 'month' | 'quarter' | 'year';
-export type GroupByType = 'salon' | 'manager';
-
+export type PeriodType = 'month' | 'quarter' | 'year' | 'custom';
 interface SalonPlanData {
   id: string;
   name: string;
@@ -20,7 +17,7 @@ interface SalonPlanData {
   percent: number;
   forecast: 'green' | 'yellow' | 'red';
   managerName: string;
-  sellersCount: number;
+  managersCount: number;
   avgCheck: number;
 }
 
@@ -28,22 +25,6 @@ interface FunnelStage {
   name: string;
   count: number;
   conversion: number;
-}
-
-interface NetworkFunnel {
-  stages: FunnelStage[];
-  traffic: number;
-  consultation: number;
-  measurement: number;
-  kp: number;
-  contract: number;
-  payment: number;
-}
-
-interface BenchmarkData {
-  date: string;
-  dealerConversion: number;
-  networkAvgConversion: number;
 }
 
 interface ManagerStats {
@@ -55,44 +36,76 @@ interface ManagerStats {
   conversion: number;
 }
 
-interface FunnelPlanTabProps {
-  salonPlanData?: SalonPlanData[];
-  networkFunnel?: NetworkFunnel;
-  benchmarkData?: BenchmarkData[];
-  managerStats?: ManagerStats[];
-  loading?: boolean;
-  period?: PeriodType;
-  groupBy?: GroupByType;
+interface BenchmarkPoint {
+  date: string;
+  dealerConversion: number;
+  networkAvgConversion: number;
 }
 
-const FunnelPlanTab: React.FC<FunnelPlanTabProps> = ({
-  salonPlanData = [],
-  networkFunnel,
-  benchmarkData = [],
-  managerStats = [],
-  loading = false,
-  period: initialPeriod = 'month',
-  groupBy = 'salon',
-}) => {
-  const [period, setPeriod] = useState<PeriodType>(initialPeriod);
-  const [groupByState, setGroupByState] = useState<GroupByType>(groupBy);
+const FunnelPlanTab: React.FC = () => {
+  const [salonPlanData, setSalonPlanData] = useState<SalonPlanData[]>([]);
+  const [stages, setStages] = useState<FunnelStage[]>([]);
+  const [benchmarkData, setBenchmarkData] = useState<BenchmarkPoint[]>([]);
+  const [managerStats, setManagerStats] = useState<ManagerStats[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [period, setPeriod] = useState<PeriodType>('month');
+  const [customDateRange, setCustomDateRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [expandedSalon, setExpandedSalon] = useState<string | null>(null);
+
+  const fetchData = useCallback(async (p: PeriodType, startDate?: string, endDate?: string) => {
+    setLoading(true);
+    setError(false);
+    try {
+      let url = `/dealer/funnel?period=${p}`;
+      if (startDate && endDate) {
+        url = `/dealer/funnel?start_date=${startDate}&end_date=${endDate}`;
+      }
+      const { data } = await apiClient.get(url);
+      const backendStages: { stage: string; label: string; count: number; conversion: number }[] = data.stages || [];
+      const mappedStages: FunnelStage[] = backendStages.map((s: any) => ({
+        name: s.label || s.stage,
+        count: s.count || 0,
+        conversion: s.conversion || 0,
+      }));
+      setStages(mappedStages);
+
+      const backendPlan: any[] = data.salon_plan_data || data.salonPlanData || [];
+      const mappedPlan: SalonPlanData[] = backendPlan.map((s: any) => ({
+        id: s.id || '',
+        name: s.name || '',
+        plan: s.plan || 0,
+        fact: s.fact || 0,
+        percent: s.percent || 0,
+        forecast: s.forecast || 'red',
+        managerName: s.managerName || '',
+        managersCount: s.managersCount || 0,
+        avgCheck: s.avgCheck || 0,
+      }));
+      setSalonPlanData(mappedPlan);
+      setBenchmarkData(data.benchmark_data || data.benchmarkData || []);
+      setManagerStats(data.manager_stats || data.managerStats || []);
+    } catch (e) {
+      console.error('Failed to fetch funnel data', e);
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (period === 'custom' && customDateRange?.[0] && customDateRange?.[1]) {
+      fetchData('custom',
+        customDateRange[0].format('YYYY-MM-DD'),
+        customDateRange[1].format('YYYY-MM-DD'));
+    } else if (period !== 'custom') {
+      fetchData(period);
+    }
+  }, [period, customDateRange, fetchData]);
 
   const totalPlan = useMemo(() => salonPlanData.reduce((sum, s) => sum + s.plan, 0), [salonPlanData]);
   const totalFact = useMemo(() => salonPlanData.reduce((sum, s) => sum + s.fact, 0), [salonPlanData]);
-  const planPercent = totalPlan > 0 ? Math.round((totalFact / totalPlan) * 100) : 0;
-
-  const stages: FunnelStage[] = useMemo(() => {
-    if (!networkFunnel) return [];
-    return [
-      { name: 'Трафик', count: networkFunnel.traffic, conversion: 100 },
-      { name: 'Консультация', count: networkFunnel.consultation, conversion: networkFunnel.traffic > 0 ? (networkFunnel.consultation / networkFunnel.traffic) * 100 : 0 },
-      { name: 'Замер', count: networkFunnel.measurement, conversion: networkFunnel.consultation > 0 ? (networkFunnel.measurement / networkFunnel.consultation) * 100 : 0 },
-      { name: 'КП', count: networkFunnel.kp, conversion: networkFunnel.measurement > 0 ? (networkFunnel.kp / networkFunnel.measurement) * 100 : 0 },
-      { name: 'Договор', count: networkFunnel.contract, conversion: networkFunnel.kp > 0 ? (networkFunnel.kp / networkFunnel.kp) * 100 : 0 },
-      { name: 'Оплата', count: networkFunnel.payment, conversion: networkFunnel.contract > 0 ? (networkFunnel.contract / networkFunnel.contract) * 100 : 0 },
-    ];
-  }, [networkFunnel]);
+  const planPercent = totalPlan > 0 ? Math.min(Math.round((totalFact / totalPlan) * 100), 100) : 0;
 
   const topManagers = useMemo(() => {
     return [...managerStats].sort((a, b) => b.revenue - a.revenue).slice(0, 3);
@@ -101,11 +114,6 @@ const FunnelPlanTab: React.FC<FunnelPlanTabProps> = ({
   const antiTopManagers = useMemo(() => {
     return [...managerStats].sort((a, b) => a.conversion - b.conversion).slice(0, 3);
   }, [managerStats]);
-
-  const getForecastColor = (forecast: 'green' | 'yellow' | 'red') => {
-    const colors = { green: '#52c41a', yellow: '#faad14', red: '#ff4d4f' };
-    return colors[forecast];
-  };
 
   const getForecastIcon = (forecast: 'green' | 'yellow' | 'red') => {
     const icons = { green: '🟢', yellow: '🟡', red: '🔴' };
@@ -194,26 +202,6 @@ const FunnelPlanTab: React.FC<FunnelPlanTabProps> = ({
     },
   ];
 
-  const funnelStageColumns = [
-    {
-      title: 'Этап',
-      dataIndex: 'name',
-      key: 'name',
-    },
-    {
-      title: 'Кол-во сделок',
-      dataIndex: 'count',
-      key: 'count',
-      render: (val: number) => <Tag color="blue">{val}</Tag>,
-    },
-    {
-      title: 'Конверсия %',
-      dataIndex: 'conversion',
-      key: 'conversion',
-      render: (val: number) => <Text strong>{val.toFixed(1)}%</Text>,
-    },
-  ];
-
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 50 }}>
@@ -222,29 +210,49 @@ const FunnelPlanTab: React.FC<FunnelPlanTabProps> = ({
     );
   }
 
+  if (error) {
+    return (
+      <Alert
+        message="Ошибка загрузки"
+        description="Не удалось загрузить данные по воронке и плану."
+        type="error"
+        showIcon
+        action={<Button icon={<ReloadOutlined />} onClick={() => {
+          if (period === 'custom' && customDateRange?.[0] && customDateRange?.[1]) {
+            fetchData('custom', customDateRange[0].format('YYYY-MM-DD'), customDateRange[1].format('YYYY-MM-DD'));
+          } else {
+            fetchData(period);
+          }
+        }}>Повторить</Button>}
+      />
+    );
+  }
+
   return (
     <div>
       <Row gutter={[16, 16]}>
         <Col xs={24} style={{ marginBottom: 16 }}>
           <Space>
-            <Radio.Group
-              value={period}
-              onChange={(e) => setPeriod(e.target.value as PeriodType)}
-              optionType="button"
-              buttonStyle="solid"
-            >
-              <Radio.Button value="month">Месяц</Radio.Button>
-              <Radio.Button value="quarter">Квартал</Radio.Button>
-              <Radio.Button value="year">Год</Radio.Button>
-            </Radio.Group>
             <Select
-              value={groupByState}
-              onChange={setGroupByState}
-              style={{ width: 150 }}
+              value={period}
+              onChange={(val) => setPeriod(val as PeriodType)}
+              style={{ width: 220 }}
             >
-              <Option value="salon">По салонам</Option>
-              <Option value="manager">По менеджерам</Option>
+              <Select.Option value="month">Месяц</Select.Option>
+              <Select.Option value="quarter">Квартал</Select.Option>
+              <Select.Option value="year">Год</Select.Option>
+              <Select.Option value="custom">Произвольный период</Select.Option>
             </Select>
+            {period === 'custom' && (
+              <RangePicker
+                value={customDateRange as any}
+                onChange={(dates) => {
+                  if (dates && dates[0] && dates[1]) {
+                    setCustomDateRange([dates[0], dates[1]]);
+                  }
+                }}
+              />
+            )}
           </Space>
         </Col>
       </Row>
@@ -338,9 +346,9 @@ const FunnelPlanTab: React.FC<FunnelPlanTabProps> = ({
                         <Text strong>{salon.managerName}</Text>
                       </Col>
                       <Col xs={24} sm={8}>
-                        <Text type="secondary">Кол-во продавцов:</Text>
+                        <Text type="secondary">Кол-во менеджеров:</Text>
                         <br />
-                        <Text strong>{salon.sellersCount}</Text>
+                        <Text strong>{salon.managersCount}</Text>
                       </Col>
                       <Col xs={24} sm={8}>
                         <Text type="secondary">Средний чек:</Text>

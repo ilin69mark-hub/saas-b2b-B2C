@@ -1,11 +1,13 @@
-// src/components/Dashboard/tabs/TerritoryPlanFactTab.tsx
-import React, { useState, useMemo } from 'react';
-import { Card, Row, Col, Typography, Table, Tag, Space, Statistic, Select, Button, Modal, Form, Input, Upload, Empty, Segmented } from 'antd';
-import { ShopOutlined, DollarOutlined, PercentageOutlined, RiseOutlined, CheckCircleOutlined, ExclamationCircleOutlined, DownloadOutlined, FilePdfOutlined, WarningOutlined, EditOutlined, MessageOutlined } from '@ant-design/icons';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, ReferenceLine, ComposedChart, Area } from 'recharts';
-import { useTerritoryManagerStore, DealerMetrics } from '@/store/territoryManagerStore';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { Card, Row, Col, Typography, Table, Tag, Space, Statistic, Select, Button, Form, Input, Empty, message, DatePicker } from 'antd';
+import { ShopOutlined, DownloadOutlined, FilePdfOutlined } from '@ant-design/icons';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, ResponsiveContainer, Cell, LabelList } from 'recharts';
+import { useTerritoryManagerStore } from '@/store/territoryManagerStore';
+import apiClient from '@/api/axiosClient';
+import dayjs from 'dayjs';
 
 const { Text } = Typography;
+const { RangePicker } = DatePicker;
 
 interface DeviationRow {
   dealerId: string;
@@ -17,13 +19,6 @@ interface DeviationRow {
   reason?: string;
   forecast: number;
   actions?: string;
-}
-
-interface ForecastScenario {
-  type: 'optimistic' | 'realistic' | 'pessimistic';
-  amount: number;
-  percent: number;
-  color: string;
 }
 
 interface ContributionData {
@@ -46,55 +41,109 @@ const DEVIATION_REASONS = [
 ];
 
 const TerritoryPlanFactTab: React.FC<TerritoryPlanFactTabProps> = ({ loading }) => {
-  const [period, setPeriod] = useState('quarter');
-  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const { fetchPlanFact } = useTerritoryManagerStore();
+  const [period, setPeriod] = useState('month');
+  const [customDateRange, setCustomDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  const [planfactData, setPlanfactData] = useState<any>(null);
+  const [pfLoading, setPfLoading] = useState(false);
   const [deviationReasons, setDeviationReasons] = useState<Record<string, string>>({});
   const [deviationActions, setDeviationActions] = useState<Record<string, string>>({});
-  const [reportProposals, setReportProposals] = useState('');
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const debounceTimers = useRef<Record<string, NodeJS.Timeout>>({});
 
-  const dealersData = useMemo(() => [
-    { dealerId: '1', dealerName: 'Мебель Москва', plan: 15000000, fact: 13800000, forecast: 16500000 },
-    { dealerId: '2', dealerName: 'Диванит Воронеж', plan: 8000000, fact: 6240000, forecast: 8800000 },
-    { dealerId: '3', dealerName: 'МебельЛига', plan: 5000000, fact: 2250000, forecast: 2750000 },
-    { dealerId: '4', dealerName: 'Салон мебели Казань', plan: 12000000, fact: 13200000, forecast: 13200000 },
-    { dealerId: '5', dealerName: 'Евромебель', plan: 7000000, fact: 4690000, forecast: 5250000 },
-  ], []);
+  useEffect(() => {
+    return () => {
+      Object.values(debounceTimers.current).forEach(clearTimeout);
+      debounceTimers.current = {};
+    };
+  }, []);
 
-  const totalPlan = useMemo(() => dealersData.reduce((s, d) => s + d.plan, 0), [dealersData]);
-  const totalFact = useMemo(() => dealersData.reduce((s, d) => s + d.fact, 0), [dealersData]);
-  const totalForecast = useMemo(() => dealersData.reduce((s, d) => s + d.forecast, 0), [dealersData]);
+  const loadData = useCallback(async (p: string, dates?: [dayjs.Dayjs, dayjs.Dayjs]) => {
+    setPfLoading(true);
+    const data = dates
+      ? await fetchPlanFact('custom', dates[0].format('YYYY-MM-DD'), dates[1].format('YYYY-MM-DD'))
+      : await fetchPlanFact(p);
+    if (data) {
+      setPlanfactData(data);
+      const reasons: Record<string, string> = {};
+      const actions: Record<string, string> = {};
+      (data.dealers || []).forEach((d: any) => {
+        if (d.reason) reasons[d.id] = d.reason;
+        if (d.actions) actions[d.id] = d.actions;
+      });
+      setDeviationReasons(reasons);
+      setDeviationActions(actions);
+    }
+    setPfLoading(false);
+  }, [fetchPlanFact]);
 
-  const optimisticScenario = useMemo((): ForecastScenario => {
-    const leaders = dealersData.filter(d => d.fact / d.plan >= 1.1);
-    const problems = dealersData.filter(d => d.fact / d.plan < 0.7);
-    const total = leaders.reduce((s, d) => s + d.forecast, 0) + problems.reduce((s, d) => s + d.fact * 1.1, 0);
-    return { type: 'optimistic', amount: total, percent: (total / totalPlan) * 100, color: '#52c41a' };
-  }, [dealersData, totalPlan]);
+  useEffect(() => {
+    if (period === 'custom' && customDateRange) {
+      loadData('custom', customDateRange);
+    } else if (period !== 'custom') {
+      loadData(period);
+    }
+  }, [period, customDateRange, loadData]);
 
-  const realisticScenario = useMemo((): ForecastScenario => ({
-    type: 'realistic', amount: totalForecast, percent: (totalForecast / totalPlan) * 100, color: '#1890ff'
-  }), [totalForecast, totalPlan]);
+  const handlePeriodChange = (value: string) => {
+    setPeriod(value);
+    if (value !== 'custom') {
+      setCustomDateRange(null);
+    }
+  };
 
-  const pessimisticScenario = useMemo((): ForecastScenario => {
-    const problems = dealersData.filter(d => d.fact / d.plan < 0.7);
-    const total = dealersData.reduce((s, d) => s + (d.fact / d.plan < 0.7 ? d.fact : d.fact * 0.9), 0);
-    return { type: 'pessimistic', amount: total, percent: (total / totalPlan) * 100, color: '#ff4d4f' };
-  }, [dealersData, totalPlan]);
+  const handleRangeChange = (dates: any) => {
+    if (dates && dates[0] && dates[1]) {
+      setCustomDateRange([dates[0], dates[1]]);
+    }
+  };
+
+  const saveDeviation = useCallback(async (dealerId: string) => {
+    setSaving(prev => ({ ...prev, [dealerId]: true }));
+    try {
+      await apiClient.put('/territory/planfact/deviation', {
+        dealer_id: dealerId,
+        period,
+        reason: deviationReasons[dealerId] || '',
+        actions: deviationActions[dealerId] || '',
+      });
+    } catch {
+      message.error('Ошибка сохранения');
+    } finally {
+      setSaving(prev => ({ ...prev, [dealerId]: false }));
+    }
+  }, [period, deviationReasons, deviationActions]);
+
+  const debouncedSave = useCallback((dealerId: string) => {
+    if (debounceTimers.current[dealerId]) {
+      clearTimeout(debounceTimers.current[dealerId]);
+    }
+    debounceTimers.current[dealerId] = setTimeout(() => {
+      saveDeviation(dealerId);
+    }, 1500);
+  }, [saveDeviation]);
+
+  const rawDealers = planfactData?.dealers || [];
+  const totalPlan = planfactData?.total_plan || 0;
+  const totalFact = planfactData?.total_fact || 0;
+
+  const dealersData = useMemo(() => {
+    return rawDealers.map((d: any) => ({
+      dealerId: d.id,
+      dealerName: d.dealer_name,
+      plan: d.plan || 0,
+      fact: d.fact || 0,
+      forecast: d.forecast || d.fact || 0,
+    }));
+  }, [rawDealers]);
+
+  const planCompletionPercent = totalPlan > 0 ? Math.round((totalFact / totalPlan) * 100) : 0;
 
   const contributionData = useMemo((): ContributionData[] => {
     return [...dealersData]
       .sort((a, b) => b.plan - a.plan)
       .map(d => ({ dealerName: d.dealerName, plan: d.plan, fact: d.fact }));
   }, [dealersData]);
-
-  const dynamicsData = useMemo(() => [
-    { month: 'Янв', plan: 12000000, fact: 10800000, forecast: null },
-    { month: 'Фев', plan: 13000000, fact: 11700000, forecast: null },
-    { month: 'Мар', plan: 14000000, fact: 12600000, forecast: null },
-    { month: 'Апр', plan: 15000000, fact: 13800000, forecast: null },
-    { month: 'Май', plan: 15000000, fact: null, forecast: 14500000 },
-    { month: 'Июн', plan: 15000000, fact: null, forecast: 15000000 },
-  ], []);
 
   const top3Dealers = useMemo(() => {
     const sorted = [...dealersData].sort((a, b) => b.fact - a.fact);
@@ -109,10 +158,12 @@ const TerritoryPlanFactTab: React.FC<TerritoryPlanFactTabProps> = ({ loading }) 
       plan: d.plan,
       fact: d.fact,
       deviation: d.fact - d.plan,
-      deviationPercent: ((d.fact - d.plan) / d.plan) * 100,
+      deviationPercent: d.plan > 0 ? ((d.fact - d.plan) / d.plan) * 100 : 0,
       forecast: d.forecast,
+      reason: deviationReasons[d.dealerId] || '',
+      actions: deviationActions[d.dealerId] || '',
     }));
-  }, [dealersData]);
+  }, [dealersData, deviationReasons, deviationActions]);
 
   const deviationText = useMemo(() => {
     const deviations = dealersData.filter(d => d.fact < d.plan).sort((a, b) => (a.fact - a.plan) - (b.fact - b.plan));
@@ -124,162 +175,181 @@ const TerritoryPlanFactTab: React.FC<TerritoryPlanFactTabProps> = ({ loading }) 
 
   const handleReasonChange = (dealerId: string, reason: string) => {
     setDeviationReasons(prev => ({ ...prev, [dealerId]: reason }));
+    debouncedSave(dealerId);
   };
 
   const handleActionsChange = (dealerId: string, actions: string) => {
     setDeviationActions(prev => ({ ...prev, [dealerId]: actions }));
+    debouncedSave(dealerId);
   };
 
+  const fmt = (v: number) => Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(v);
   const deviationColumns = [
     { title: 'Дилер', dataIndex: 'dealerName', key: 'dealerName', render: (n: string, r: DeviationRow) => <Space><ShopOutlined style={{ color: r.deviation >= 0 ? '#52c41a' : '#ff4d4f' }} />{n}</Space> },
-    { title: 'План', dataIndex: 'plan', key: 'plan', render: (v: number) => `${(v / 1000000).toFixed(1)} млн ₽` },
-    { title: 'Факт', dataIndex: 'fact', key: 'fact', render: (v: number) => `${(v / 1000000).toFixed(1)} млн ₽` },
+    { title: 'План', dataIndex: 'plan', key: 'plan', render: (v: number) => fmt(v) + ' ₽' },
+    { title: 'Факт', dataIndex: 'fact', key: 'fact', render: (v: number) => fmt(v) + ' ₽' },
     { title: 'Отклонение', key: 'deviation', render: (_: any, r: DeviationRow) => (
       <Tag color={r.deviation >= 0 ? 'green' : 'red'}>
-        {(r.deviation / 1000000).toFixed(1)} млн ({r.deviationPercent.toFixed(0)}%)
+        {fmt(r.deviation)} ₽ ({r.deviationPercent.toFixed(0)}%)
       </Tag>
     )},
     { title: 'Причина', key: 'reason', render: (_: any, r: DeviationRow) => (
       <Select
         value={deviationReasons[r.dealerId]}
         onChange={(v) => handleReasonChange(r.dealerId, v)}
-        style={{ width: 150 }}
+        style={{ width: 200 }}
         placeholder="Выберите"
+        popupMatchSelectWidth={false}
       >
         {DEVIATION_REASONS.map(reason => (
           <Select.Option key={reason.value} value={reason.value}>{reason.label}</Select.Option>
         ))}
       </Select>
     )},
-    { title: 'Прогноз', dataIndex: 'forecast', key: 'forecast', render: (v: number) => `${(v / 1000000).toFixed(1)} млн ₽` },
+    { title: 'Прогноз', dataIndex: 'forecast', key: 'forecast', render: (v: number) => fmt(v) + ' ₽' },
     { title: 'Действия', key: 'actions', render: (_: any, r: DeviationRow) => (
-      <Input.TextArea
-        value={deviationActions[r.dealerId]}
-        onChange={(e) => handleActionsChange(r.dealerId, e.target.value)}
-        placeholder="План мероприятий"
-        rows={1}
-      />
+      <Space>
+        <Input.TextArea
+          value={deviationActions[r.dealerId]}
+          onChange={(e) => handleActionsChange(r.dealerId, e.target.value)}
+          placeholder="План мероприятий"
+          rows={1}
+          style={{ width: 180 }}
+        />
+        {saving[r.dealerId] && <Text type="secondary" style={{ fontSize: 11 }}>···</Text>}
+      </Space>
     )},
   ];
 
-  const generatePDF = async () => {
-    const token = localStorage.getItem('accessToken');
+  const getBarColor = (fact: number, plan: number) => {
+    if (plan === 0) return '#d9d9d9';
+    return fact >= plan ? '#52c41a' : '#ff4d4f';
+  };
+
+  const handleDownloadPdf = async () => {
     try {
-      const res = await fetch('/api/franchiser/reports/generate', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          period,
-          proposals: reportProposals,
-          deviations: deviationReasons,
-          actions: deviationActions,
-        }),
-      });
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `отчёт-${period}.pdf`;
-        a.click();
+      let url = `/territory/planfact/pdf?period=${period}`;
+      if (period === 'custom' && customDateRange) {
+        url = `/territory/planfact/pdf?start_date=${customDateRange[0].format('YYYY-MM-DD')}&end_date=${customDateRange[1].format('YYYY-MM-DD')}`;
       }
-    } catch (e) {
-      setReportModalOpen(true);
+      const res = await apiClient.get(url, { responseType: 'blob' });
+      const blobUrl = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.setAttribute('download', `planfact-${period}-${new Date().toISOString().slice(0, 10)}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch {
+      message.error('Ошибка генерации PDF');
     }
   };
+
+  const periodLabel = period === 'quarter' ? 'Квартал' : period === 'custom' ? 'Произвольный период' : period === 'week' ? 'Неделя' : 'Месяц';
 
   return (
     <div>
       <Card size="small" style={{ marginBottom: 16 }}>
-        <Row gutter={16}>
+        <Row gutter={16} align="middle">
           <Col>
-            <Select value={period} onChange={setPeriod} style={{ width: 120 }}>
+            <Select value={period} onChange={handlePeriodChange} style={{ width: 160 }}>
+              <Select.Option value="week">Неделя</Select.Option>
               <Select.Option value="month">Месяц</Select.Option>
               <Select.Option value="quarter">Квартал</Select.Option>
+              <Select.Option value="custom">Произвольный период</Select.Option>
             </Select>
           </Col>
+          {period === 'custom' && (
+            <Col>
+              <RangePicker value={customDateRange as any} onChange={handleRangeChange} />
+            </Col>
+          )}
           <Col>
-            <Button type="primary" icon={<FilePdfOutlined />} onClick={() => setReportModalOpen(true)}>
-              Сформировать PDF-отчёт
+            <Button type="primary" icon={<FilePdfOutlined />} onClick={handleDownloadPdf}>
+              PDF
             </Button>
           </Col>
         </Row>
       </Card>
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col xs={24} sm={8}>
-          <Card size="small" style={{ background: optimisticScenario.color + '15', borderColor: optimisticScenario.color }}>
-            <Statistic
-              title="Оптимистичный"
-              value={optimisticScenario.amount / 1000000}
-              suffix="млн ₽"
-              precision={1}
-              valueStyle={{ color: optimisticScenario.color }}
-            />
-            <Text style={{ color: optimisticScenario.color }}>{optimisticScenario.percent.toFixed(0)}% плана</Text>
+        <Col xs={24} sm={12}>
+          <Card size="small" styles={{ body: { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 90 } }}>
+            <div style={{ textAlign: 'center' }}>
+              <Statistic
+                title="Общий план"
+                value={totalPlan}
+                suffix="₽"
+                formatter={(v) => Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Number(v))}
+              />
+              <div style={{ height: 22 }} />
+            </div>
           </Card>
         </Col>
-        <Col xs={24} sm={8}>
-          <Card size="small" style={{ background: realisticScenario.color + '15', borderColor: realisticScenario.color }}>
-            <Statistic
-              title="Реалистичный"
-              value={realisticScenario.amount / 1000000}
-              suffix="млн ₽"
-              precision={1}
-              valueStyle={{ color: realisticScenario.color }}
-            />
-            <Text style={{ color: realisticScenario.color }}>{realisticScenario.percent.toFixed(0)}% плана</Text>
-          </Card>
-        </Col>
-        <Col xs={24} sm={8}>
-          <Card size="small" style={{ background: pessimisticScenario.color + '15', borderColor: pessimisticScenario.color }}>
-            <Statistic
-              title="Пессимистичный"
-              value={pessimisticScenario.amount / 1000000}
-              suffix="млн ₽"
-              precision={1}
-              valueStyle={{ color: pessimisticScenario.color }}
-            />
-            <Text style={{ color: pessimisticScenario.color }}>{pessimisticScenario.percent.toFixed(0)}% плана</Text>
+        <Col xs={24} sm={12}>
+          <Card size="small" styles={{ body: { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 90 } }}>
+            <div style={{ textAlign: 'center' }}>
+              <Statistic
+                title="Общий факт"
+                value={totalFact}
+                suffix="₽"
+                valueStyle={{ color: planCompletionPercent >= 80 ? '#52c41a' : '#ff4d4f' }}
+                formatter={(v) => Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Number(v))}
+              />
+              <Text type="secondary">{planCompletionPercent}% выполнения</Text>
+            </div>
           </Card>
         </Col>
       </Row>
 
-      <Text>{deviationText}</Text>
+      {dealersData.length > 0 && (
+        <Text>{deviationText}</Text>
+      )}
 
-      <Card size="small" title="Вклад дилеров в план" style={{ marginTop: 16, marginBottom: 16 }}>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={contributionData} layout="vertical">
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis type="number" />
-            <YAxis type="category" dataKey="dealerName" width={120} />
-            <RechartsTooltip />
-            <Legend />
-            <Bar dataKey="plan" fill="#d9d9d9" name="План" />
-            <Bar dataKey="fact" name="Факт" fill="#52c41a" />
-          </BarChart>
-        </ResponsiveContainer>
-        {
-          top3Dealers > totalFact * 0.6 && (
-            <Tag color="gold" style={{ marginTop: 8 }}>Топ-3 дилера дают {((top3Dealers / totalFact) * 100).toFixed(0)}% результата</Tag>
-          )
-        }
-      </Card>
-
-      <Card size="small" title="План-факт динамика" style={{ marginBottom: 16 }}>
-        <ResponsiveContainer width="100%" height={250}>
-          <ComposedChart data={dynamicsData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="month" />
-            <YAxis />
-            <RechartsTooltip />
-            <Legend />
-            <Area type="monotone" dataKey="fact" fill="#ff4d4f" fillOpacity={0.2} stroke="transparent" />
-            <Line type="dashed" dataKey="plan" stroke="#d9d9d9" strokeDasharray="5 5" name="План" />
-            <Line type="solid" dataKey="fact" stroke="#52c41a" strokeWidth={2} name="Факт" />
-            <Line type="dashed" dataKey="forecast" stroke="#1890ff" strokeDasharray="3 3" name="Прогноз" />
-          </ComposedChart>
-        </ResponsiveContainer>
+      <Card size="small" title={`Вклад дилеров в план — ${periodLabel}`} style={{ marginTop: 16, marginBottom: 16 }}>
+        {contributionData.length > 0 ? (
+          <>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={contributionData} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis type="number" />
+                <YAxis type="category" dataKey="dealerName" width={120} />
+                <Legend content={(props: any) => {
+                  const { payload } = props;
+                  return (
+                    <div style={{ display: 'flex', gap: 16, justifyContent: 'center', padding: '8px 0' }}>
+                      {payload?.map((entry: any, idx: number) => (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {entry.value === 'Факт' ? (
+                            <span style={{ display: 'inline-block', width: 14, height: 14, background: 'linear-gradient(90deg, #52c41a 50%, #ff4d4f 50%)', borderRadius: 2 }} />
+                          ) : (
+                            <span style={{ display: 'inline-block', width: 14, height: 14, background: entry.color, borderRadius: 2 }} />
+                          )}
+                          <span>{entry.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }} />
+                <Bar dataKey="plan" fill="#1890ff" name="План" radius={[4, 4, 0, 0]} isAnimationActive={false} activeBar={false}>
+                  <LabelList dataKey="plan" position="insideRight" formatter={(v: number) => Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Number(v))} style={{ fill: '#fff', fontWeight: 'bold', fontSize: 12 }} />
+                </Bar>
+                <Bar dataKey="fact" name="Факт" radius={[4, 4, 0, 0]} isAnimationActive={false} activeBar={false}>
+                  <LabelList dataKey="fact" position="insideRight" formatter={(v: number) => Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Number(v))} style={{ fill: '#fff', fontWeight: 'bold', fontSize: 12 }} />
+                  {contributionData.map((d, i) => (
+                    <Cell key={i} fill={getBarColor(d.fact, d.plan)} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            {top3Dealers > 0 && totalPlan > 0 && (
+              <Tag color="gold" style={{ marginTop: 8 }}>Топ-3 дилера дают {((top3Dealers / totalPlan) * 100).toFixed(0)}% плана</Tag>
+            )}
+          </>
+        ) : (
+          <Empty description="Нет данных за выбранный период" />
+        )}
       </Card>
 
       <Card size="small" title="Детализация отклонений">
@@ -288,33 +358,10 @@ const TerritoryPlanFactTab: React.FC<TerritoryPlanFactTabProps> = ({ loading }) 
           columns={deviationColumns}
           rowKey="dealerId"
           size="small"
-          loading={loading}
+          loading={loading || pfLoading}
           pagination={false}
         />
       </Card>
-
-      <Modal
-        title="Предпросмотр отчёта"
-        open={reportModalOpen}
-        onCancel={() => setReportModalOpen(false)}
-        width={800}
-        footer={[
-          <Button key="cancel" onClick={() => setReportModalOpen(false)}>Закрыть</Button>,
-          <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={generatePDF}>Скачать PDF</Button>,
-        ]}
-      >
-        <Card size="small" title="Сводка">
-          <Space direction="vertical">
-            <Text>Период: {period === 'quarter' ? 'Квартал' : 'Месяц'}</Text>
-            <Text>План: {(totalPlan / 1000000).toFixed(1)} млн ₽</Text>
-            <Text>Факт: {(totalFact / 1000000).toFixed(1)} млн ₽</Text>
-            <Text>Прогноз: {(totalForecast / 1000000).toFixed(1)} млн ₽</Text>
-          </Space>
-        </Card>
-        <Form.Item label="Предложения">
-          <Input.TextArea value={reportProposals} onChange={e => setReportProposals(e.target.value)} rows={4} placeholder="Введите предложения для руководителя" />
-        </Form.Item>
-      </Modal>
     </div>
   );
 };

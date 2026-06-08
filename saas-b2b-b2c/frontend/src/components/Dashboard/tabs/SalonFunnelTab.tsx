@@ -4,6 +4,8 @@ import { PlusOutlined, WarningOutlined, ExclamationCircleOutlined, UserAddOutlin
 import apiClient from '@/api/axiosClient';
 import { useCreateLeadMutation, useGetLeadsQuery, useUpdateLeadStatusMutation } from '@/services/api';
 import dayjs from 'dayjs';
+import PhoneInput from '@/components/common/PhoneInput';
+import { normalizeForApi } from '@/utils/phone';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -93,6 +95,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
     try {
       await createLead({
         ...values,
+        phone: normalizeForApi(String(values.phone || '')),
         budget: values.budget ? Number(values.budget) : undefined,
       }).unwrap();
       message.success('Лид добавлен');
@@ -420,7 +423,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
             <Input placeholder="Иван Иванов" />
           </Form.Item>
           <Form.Item name="phone" label="Телефон">
-            <Input placeholder="+7 (999) 123-45-67" />
+            <PhoneInput />
           </Form.Item>
           <Form.Item name="interest_product" label="Интерес (Товар)">
             <Input placeholder="Диван" />

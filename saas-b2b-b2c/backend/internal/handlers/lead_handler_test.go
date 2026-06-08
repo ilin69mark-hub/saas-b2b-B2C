@@ -119,7 +119,7 @@ func TestLeadHandler_CreateLead_ValidRequest(t *testing.T) {
 
 	body := map[string]interface{}{
 		"full_name": "New Lead",
-		"phone":     "+1234567890",
+		"phone":     "+79991234567",
 		"email":     "new@example.com",
 	}
 	jsonBody, _ := json.Marshal(body)

@@ -86,7 +86,7 @@ func TestLeadRepository_UpdateLeadStatus_Postgres(t *testing.T) {
 	err := repo.CreateLead(context.Background(), &lead)
 	require.NoError(t, err)
 
-	err = repo.UpdateLeadStatus(context.Background(), lead.ID, "contact")
+	err = repo.UpdateLeadStatus(context.Background(), lead.ID, "contact", "")
 	require.NoError(t, err)
 
 	found, err := repo.GetLeadByID(context.Background(), lead.ID, lead.ManagerID)

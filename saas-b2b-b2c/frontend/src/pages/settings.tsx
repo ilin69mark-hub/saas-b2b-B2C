@@ -4,19 +4,17 @@ import React, { useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { Layout, Row, Col, Card, Switch, Typography, Divider, Button, Breadcrumb } from 'antd';
+import { Layout, Row, Col, Card, Typography, Button, Breadcrumb } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import Link from 'next/link';
 import { RootState } from '@/store';
-import { useThemeMode } from '@/components/ThemeProvider';
 
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
 const { Content } = Layout;
 
 const SettingsPage: React.FC = () => {
   const router = useRouter();
   const { isAuthenticated } = useSelector((state: RootState) => state.auth);
-  const { theme, toggleTheme } = useThemeMode();
 
   useEffect(() => {
     const token = localStorage.getItem('accessToken');
@@ -26,7 +24,7 @@ const SettingsPage: React.FC = () => {
   }, [isAuthenticated, router]);
 
   return (
-    <Layout style={{ minHeight: '100vh',  }}>
+    <Layout style={{ minHeight: '100vh' }}>
       <Head><title>Настройки</title></Head>
       <Content style={{ padding: 24 }}>
         <Row justify="center">
@@ -49,24 +47,19 @@ const SettingsPage: React.FC = () => {
             <Title level={3}>Настройки</Title>
 
             <Card title="Оформление">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <Text strong>Тёмная тема</Text>
-                  <br />
-                  <Text type="secondary">
-                    {theme === 'dark' ? 'Сейчас включена тёмная тема' : 'Сейчас включена светлая тема'}
-                  </Text>
-                </div>
-                <Switch
-                  checked={theme === 'dark'}
-                  onChange={toggleTheme}
-                  checkedChildren="🌙"
-                  unCheckedChildren="☀️"
-                />
-              </div>
-              <Divider />
+              <Paragraph>
+                Переключение темы (светлая / тёмная) теперь выполняется
+                иконкой&nbsp;
+                <Text strong>☀️ / 🌙</Text>
+                &nbsp;в правом верхнем углу панели управления. Выбранная
+                тема сохраняется в браузере и применяется мгновенно.
+              </Paragraph>
+            </Card>
+
+            <Card title="Дополнительные настройки" style={{ marginTop: 24 }}>
               <Text type="secondary">
-                Тема применяется мгновенно и сохраняется в браузере между сеансами.
+                Здесь в будущем появятся оповещения, безопасность и управление
+                интеграциями.
               </Text>
             </Card>
           </Col>

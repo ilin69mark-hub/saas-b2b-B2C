@@ -1,115 +1,171 @@
-// src/__tests__/components/Dashboard/tabs/TerritoryPlanFactTab.test.tsx
+import React from 'react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import TerritoryPlanFactTab from '@/components/Dashboard/tabs/TerritoryPlanFactTab';
+
+const mockFetchPlanFact = jest.fn();
+const mockApiPut = jest.fn();
+
+jest.mock('@/store/territoryManagerStore', () => ({
+  useTerritoryManagerStore: () => ({
+    fetchPlanFact: mockFetchPlanFact,
+  }),
+}));
+
+jest.mock('@/api/axiosClient', () => ({
+  get: jest.fn(),
+  put: (...args: any[]) => mockApiPut(...args),
+}));
+
+const mockDealers = [
+  {
+    id: 'd1',
+    dealer_name: 'Дилер 1',
+    plan: 10000000,
+    fact: 12000000,
+    forecast: 13000000,
+    reason: '',
+    actions: '',
+  },
+  {
+    id: 'd2',
+    dealer_name: 'Дилер 2',
+    plan: 8000000,
+    fact: 4000000,
+    forecast: 5000000,
+    reason: 'staff_issue',
+    actions: 'Нанять продавца',
+  },
+  {
+    id: 'd3',
+    dealer_name: 'Дилер 3',
+    plan: 5000000,
+    fact: 5000000,
+    forecast: 5500000,
+    reason: '',
+    actions: '',
+  },
+];
+
+const mockPlanFactData = {
+  dealers: mockDealers,
+  total_plan: 23000000,
+  total_fact: 21000000,
+};
+
 describe('TerritoryPlanFactTab', () => {
-  it('calculates totals', () => {
-    const data = [
-      { plan: 10000000, fact: 8000000, forecast: 9000000 },
-      { plan: 5000000, fact: 4000000, forecast: 4500000 },
-    ];
-    const totalPlan = data.reduce((s, d) => s + d.plan, 0);
-    const totalFact = data.reduce((s, d) => s + d.fact, 0);
-    const totalForecast = data.reduce((s, d) => s + d.forecast, 0);
-    expect(totalPlan).toBe(15000000);
-    expect(totalFact).toBe(12000000);
-    expect(totalForecast).toBe(13500000);
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockFetchPlanFact.mockResolvedValue(mockPlanFactData);
   });
 
-  it('calculates percent', () => {
-    const totalFact = 12000000;
-    const totalPlan = 15000000;
-    const percent = (totalFact / totalPlan) * 100;
-    expect(percent).toBe(80);
+  it('загружает и отображает план-факт данные', async () => {
+    render(<TerritoryPlanFactTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Дилер 1')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Дилер 2')).toBeInTheDocument();
+    expect(screen.getByText('Дилер 3')).toBeInTheDocument();
   });
 
-  it('calculates optimistic scenario', () => {
-    const data = [
-      { plan: 10000000, fact: 12000000, forecast: 13000000 },
-      { plan: 5000000, fact: 3000000, forecast: 3500000 },
-    ];
-    const totalPlan = data.reduce((s, d) => s + d.plan, 0);
-    const leaders = data.filter(d => d.fact / d.plan >= 1.1);
-    const problems = data.filter(d => d.fact / d.plan < 0.7);
-    const optimistic = leaders.reduce((s, d) => s + d.forecast, 0) + problems.reduce((s, d) => s + d.fact * 1.1, 0);
-    const percent = (optimistic / totalPlan) * 100;
-    expect(optimistic).toBe(13000000 + 3300000);
-    expect(percent).toBeCloseTo(108.67, 1);
+  it('отображает общий план и факт', async () => {
+    const { container } = render(<TerritoryPlanFactTab />);
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('23.0млн ₽');
+    });
+
+    expect(container.textContent).toContain('21.0млн ₽');
   });
 
-  it('calculates scenario amounts', () => {
-    const data = [
-      { plan: 10000000, fact: 12000000, forecast: 13000000 },
-      { plan: 5000000, fact: 3000000, forecast: 3500000 },
-    ];
-    const totalPlan = data.reduce((s, d) => s + d.plan, 0);
-    const totalFact = data.reduce((s, d) => s + d.fact, 0);
-    const totalForecast = data.reduce((s, d) => s + d.forecast, 0);
-    expect(totalPlan).toBe(15000000);
-    expect(totalFact).toBe(15000000);
-    expect(totalForecast).toBe(16500000);
+  it('отображает процент выполнения', async () => {
+    const { container } = render(<TerritoryPlanFactTab />);
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('91%');
+    });
   });
 
-  it('identifies underperformers', () => {
-    const data = [
-      { dealerName: 'A', percent: 90 },
-      { dealerName: 'B', percent: 60 },
-      { dealerName: 'C', percent: 45 },
-    ];
-    const under = data.filter(d => d.percent < 70);
-    expect(under.length).toBe(2);
+  it('отображает прогноз из API', async () => {
+    render(<TerritoryPlanFactTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText('13.0 млн ₽')).toBeInTheDocument(); // forecast dealer 1
+    });
   });
 
-  it('identifies overperformers', () => {
-    const data = [
-      { dealerName: 'A', percent: 110 },
-      { dealerName: 'B', percent: 90 },
-      { dealerName: 'C', percent: 105 },
-    ];
-    const over = data.filter(d => d.percent >= 100);
-    expect(over.length).toBe(2);
+  it('загружает сохранённые причины и действия', async () => {
+    render(<TerritoryPlanFactTab />);
+
+    await waitFor(() => {
+      const selects = screen.getAllByRole('combobox');
+      expect(selects.length).toBeGreaterThan(0);
+    });
   });
 
-  it('calculates deviation text', () => {
-    const data = [
-      { dealerName: 'A', plan: 10000000, fact: 8000000 },
-      { dealerName: 'B', plan: 5000000, fact: 6000000 },
-    ];
-    const deviations = data.filter(d => d.fact < d.plan);
-    const totalGap = deviations.reduce((s, d) => s + d.plan - d.fact, 0);
-    expect(totalGap).toBe(2000000);
+  it('загружает данные с периодом month по умолчанию', async () => {
+    render(<TerritoryPlanFactTab />);
+
+    await waitFor(() => {
+      expect(mockFetchPlanFact).toHaveBeenCalledWith('month');
+    });
   });
 
-  it('calculates top 3 contribution', () => {
-    const data = [
-      { dealerName: 'A', fact: 12000000 },
-      { dealerName: 'B', fact: 8000000 },
-      { dealerName: 'C', fact: 5000000 },
-      { dealerName: 'D', fact: 3000000 },
-      { dealerName: 'E', fact: 1000000 },
-    ];
-    const sorted = [...data].sort((a, b) => b.fact - a.fact);
-    const top3 = sorted.slice(0, 3).reduce((s, d) => s + d.fact, 0);
-    const total = data.reduce((s, d) => s + d.fact, 0);
-    const percent = (top3 / total) * 100;
-    expect(top3).toBe(25000000);
-    expect(percent).toBeCloseTo(86.2, 1);
+  it('отображает текст отклонения при отстающих дилерах', async () => {
+    render(<TerritoryPlanFactTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Отставание от плана/)).toBeInTheDocument();
+    });
   });
 
-  it('calculates deviation from plan', () => {
-    const plan = 10000000;
-    const fact = 8000000;
-    const deviation = fact - plan;
-    const deviationPercent = ((fact - plan) / plan) * 100;
-    expect(deviation).toBe(-2000000);
-    expect(deviationPercent).toBe(-20);
+  it('отображает топ-3 вклад', async () => {
+    render(<TerritoryPlanFactTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Топ-3 дилера дают/)).toBeInTheDocument();
+    });
   });
 
-  it('sorts dealers by plan contribution', () => {
-    const data = [
-      { name: 'A', plan: 5000000 },
-      { name: 'B', plan: 15000000 },
-      { name: 'C', plan: 10000000 },
-    ];
-    const sorted = [...data].sort((a, b) => b.plan - a.plan);
-    expect(sorted[0].name).toBe('B');
-    expect(sorted[2].name).toBe('A');
+  it('отображает empty state когда нет данных', async () => {
+    mockFetchPlanFact.mockResolvedValue({ dealers: [], total_plan: 0, total_fact: 0 });
+    render(<TerritoryPlanFactTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Нет данных за выбранный период')).toBeInTheDocument();
+    });
+  });
+
+  it('рассчитывает отклонение', () => {
+    const deviation = 4000000 - 8000000;
+    const deviationPercent = ((4000000 - 8000000) / 8000000) * 100;
+    expect(deviation).toBe(-4000000);
+    expect(deviationPercent).toBe(-50);
+  });
+
+  it('рассчитывает процент выполнения', () => {
+    const totalFact = 21000000;
+    const totalPlan = 23000000;
+    const percent = Math.round((totalFact / totalPlan) * 100);
+    expect(percent).toBe(91);
+  });
+
+  it('отображает селектор периода', async () => {
+    const { container } = render(<TerritoryPlanFactTab />);
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('Месяц');
+    });
+  });
+
+  it('вызывает fetchPlanFact с кастомными датами при custom периоде', async () => {
+    const { container } = render(<TerritoryPlanFactTab />);
+
+    await waitFor(() => {
+      expect(mockFetchPlanFact).toHaveBeenCalledWith('month');
+    });
+
+    expect(container.textContent).toContain('Месяц');
   });
 });

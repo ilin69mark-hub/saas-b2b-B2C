@@ -1,18 +1,33 @@
 // src/components/Dashboard/tabs/TerritoryMapTab.tsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Row, Col, Typography, Table, Tag, Space, Statistic, Input, Select, Collapse, List, Avatar, Tooltip, Progress, Segmented, Spin, Button } from 'antd';
-import { ShopOutlined, WarningOutlined, CheckCircleOutlined, ClockCircleOutlined, SearchOutlined, ArrowUpOutlined, ArrowDownOutlined, DollarOutlined, PercentageOutlined, RiseOutlined, UserOutlined, AlertOutlined, LinkOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { Card, Row, Col, Typography, Table, Tag, Space, Statistic, Input, Collapse, List, Tooltip, Segmented, Spin, Button, Empty, Divider, Alert } from 'antd';
+import { ShopOutlined, WarningOutlined, CheckCircleOutlined, SearchOutlined, ArrowUpOutlined, ArrowDownOutlined, RiseOutlined, UserOutlined, AlertOutlined, LinkOutlined } from '@ant-design/icons';
+import { useRouter } from 'next/router';
 import { useTerritoryManagerStore, DealerMetrics } from '@/store/territoryManagerStore';
+import apiClient from '@/api/axiosClient';
 
 const { Text } = Typography;
 const { Search } = Input;
 
 interface DealerDetail {
-  dealerId: string;
-  dealerName: string;
-  salons: { name: string; sales: number }[];
-  salesHistory: number[];
-  recentAlerts: { title: string; date: string }[];
+  dealer_id: string;
+  dealer_name: string;
+  email?: string;
+  phone?: string;
+  manager_name?: string;
+  status?: string;
+  plan: number;
+  fact: number;
+  plan_percent: number;
+  conversion: number;
+  avg_check: number;
+  margin: number;
+  debt: number;
+  task_count: number;
+  salons: { id: string; name: string; address: string; sales: number; manager_name: string }[];
+  sales_history: number[];
+  plan_history: number[];
+  recent_alerts: { id: string; title: string; category: string; priority: string; created_at: string }[];
 }
 
 interface TerritoryMapTabProps {
@@ -21,14 +36,17 @@ interface TerritoryMapTabProps {
 }
 
 const TerritoryMapTab: React.FC<TerritoryMapTabProps> = ({ dealers: initialDealers, loading: initialLoading }) => {
-  const { dealers: storeDealers, setDealers, summary } = useTerritoryManagerStore();
+  const router = useRouter();
+  const { dealers: storeDealers, setDealers, summary, isLoading: storeLoading, error, fetchDealers } = useTerritoryManagerStore();
   const dealers = initialDealers || storeDealers;
+  const tableLoading = initialLoading !== undefined ? initialLoading : storeLoading;
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  type StatusFilter = 'all' | 'green' | 'yellow' | 'red' | 'leaders' | 'problem';
   const [expandedDealer, setExpandedDealer] = useState<string | null>(null);
   const [detailData, setDetailData] = useState<DealerDetail | null>(null);
-  const [sortField, setSortField] = useState<string>('planPercent');
-  const [sortOrder, setSortOrder] = useState<'ascend' | 'descend'>('descend');
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [hoveredBar, setHoveredBar] = useState<number | null>(null);
 
   useEffect(() => {
     if (initialDealers) {
@@ -37,69 +55,55 @@ const TerritoryMapTab: React.FC<TerritoryMapTabProps> = ({ dealers: initialDeale
   }, [initialDealers, setDealers]);
 
   const filteredDealers = useMemo(() => {
+    const sf = statusFilter as StatusFilter;
     return dealers.filter(d => {
       const matchesSearch = d.dealerName.toLowerCase().includes(searchText.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || d.status === statusFilter;
-      const matchesLeader = statusFilter === 'leaders' ? d.planPercent >= 100 : true;
-      const matchesProblem = statusFilter === 'problem' ? d.planPercent < 70 : true;
-      return matchesSearch && matchesStatus && (statusFilter !== 'leaders' || matchesLeader) && (statusFilter !== 'problem' || matchesProblem);
+      const matchesStatus = sf === 'all' || sf === 'leaders' || sf === 'problem' || d.status === sf;
+      const matchesLeader = sf !== 'leaders' || d.planPercent >= 100;
+      const matchesProblem = sf !== 'problem' || d.planPercent < 70;
+      return matchesSearch && matchesStatus && matchesLeader && matchesProblem;
     });
   }, [dealers, searchText, statusFilter]);
-
-  const sortedDealers = useMemo(() => {
-    return [...filteredDealers].sort((a, b) => {
-      const aVal = a[sortField as keyof DealerMetrics] as number;
-      const bVal = b[sortField as keyof DealerMetrics] as number;
-      return sortOrder === 'ascend' ? aVal - bVal : bVal - aVal;
-    });
-  }, [filteredDealers, sortField, sortOrder]);
 
   const territoryTotals = useMemo(() => {
     const totalPlan = dealers.reduce((s, d) => s + (d.plan || 0), 0);
     const totalFact = dealers.reduce((s, d) => s + (d.fact || 0), 0);
     const avgConversion = dealers.length ? dealers.reduce((s, d) => s + d.conversion, 0) / dealers.length : 0;
-    const avgMargin = dealers.length ? dealers.reduce((s, d) => s + d.margin, 0) / dealers.length : 0;
+    const avgMargin = dealers.length ? dealers.reduce((s, d) => s + (d.margin || 0), 0) / dealers.length : 0;
     const redZoneCount = dealers.filter(d => d.status === 'red').length;
-    const totalDebt = dealers.reduce((s, d) => s + d.debt, 0);
+    const totalDebt = dealers.reduce((s, d) => s + (d.debt || 0), 0);
     return { totalPlan, totalFact, avgConversion, avgMargin, redZoneCount, totalDebt };
   }, [dealers]);
 
   const planCompletionPercent = territoryTotals.totalPlan > 0 ? (territoryTotals.totalFact / territoryTotals.totalPlan) * 100 : 0;
-  const forecastPercent = 92;
-
-  const handleSort = (field: string) => {
-    if (field === sortField) {
-      setSortOrder(sortOrder === 'ascend' ? 'descend' : 'ascend');
-    } else {
-      setSortField(field);
-      setSortOrder('descend');
-    }
-  };
+  const forecastPercent = summary?.quarterForecastPercent || 0;
+  const formatRub = (v: number) => Math.round(v).toLocaleString('ru-RU') + ' ₽';
 
   const fetchDealerDetails = async (dealerId: string) => {
+    setDetailLoading(true);
     try {
-      const token = localStorage.getItem('accessToken');
-      const res = await fetch(`/api/franchiser/dealers/${dealerId}/details`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDetailData(data);
-      }
+      const res = await apiClient.get(`/franchiser/dealers/${dealerId}/details`);
+      setDetailData(res.data);
     } catch (e) {
+      console.error('Error fetching dealer details:', e);
+      const fallbackName = dealers.find(d => d.dealerId === dealerId)?.dealerName || '';
       setDetailData({
-        dealerId,
-        dealerName: dealers.find(d => d.dealerId === dealerId)?.dealerName || '',
-        salons: [
-          { name: 'Салон 1', sales: 4200000 },
-          { name: 'Салон 2', sales: 2800000 },
-        ],
-        salesHistory: [3200, 4100, 3800, 4500, 4200, 4800],
-        recentAlerts: [
-          { title: 'Падение конверсии', date: '2026-04-28' },
-          { title: 'Низкий трафик', date: '2026-04-25' },
-        ],
+        dealer_id: dealerId,
+        dealer_name: fallbackName,
+        plan: dealers.find(d => d.dealerId === dealerId)?.plan || 0,
+        fact: dealers.find(d => d.dealerId === dealerId)?.fact || 0,
+        plan_percent: dealers.find(d => d.dealerId === dealerId)?.planPercent || 0,
+        conversion: dealers.find(d => d.dealerId === dealerId)?.conversion || 0,
+        avg_check: dealers.find(d => d.dealerId === dealerId)?.avgCheck || 0,
+        margin: dealers.find(d => d.dealerId === dealerId)?.margin || 0,
+        debt: dealers.find(d => d.dealerId === dealerId)?.debt || 0,
+        task_count: dealers.find(d => d.dealerId === dealerId)?.taskCount || 0,
+        salons: [],
+        sales_history: [],
+        recent_alerts: [],
       });
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -119,90 +123,65 @@ const TerritoryMapTab: React.FC<TerritoryMapTabProps> = ({ dealers: initialDeale
     return '#ff4d4f';
   };
 
-  const getCellColor = (field: string, value: number) => {
-    switch (field) {
-      case 'planPercent':
-        return value >= 90 ? '#f6ffed' : value >= 70 ? '#fffbe6' : '#fff1f0';
-      case 'conversion':
-        return value >= 3 ? '#f6ffed' : value >= 2 ? '#fffbe6' : '#fff1f0';
-      case 'margin':
-        return value >= 25 ? '#f6ffed' : value >= 20 ? '#fffbe6' : '#fff1f0';
-      default:
-        return 'transparent';
-    }
-  };
+  const getRowHeat = (status: 'green' | 'yellow' | 'red') =>
+    status === 'green' ? '#52c41a20' : status === 'yellow' ? '#fa8c1620' : '#ff4d4f20';
 
   const columns = [
     {
       title: 'Дилер',
       dataIndex: 'dealerName',
       key: 'dealerName',
-      sorter: true,
+      align: 'center',
+      sorter: (a: DealerMetrics, b: DealerMetrics) => a.dealerName.localeCompare(b.dealerName),
       render: (name: string, record: DealerMetrics) => (
         <Space>
           <ShopOutlined style={{ color: getStatusColor(record) }} />
           <Text strong>{name}</Text>
-          {record.status === 'red' && <WarningOutlined style={{ color: '#ff4d4f' }} />}
         </Space>
       ),
     },
     {
-      title: () => (
-        <Text onClick={() => handleSort('planPercent')}>
-          План % {sortField === 'planPercent' && (sortOrder === 'ascend' ? <ArrowUpOutlined /> : <ArrowDownOutlined />)}
-        </Text>
-      ),
+      title: 'План %',
       dataIndex: 'planPercent',
       key: 'planPercent',
-      sorter: true,
+      align: 'center',
+      sorter: (a: DealerMetrics, b: DealerMetrics) => a.planPercent - b.planPercent,
       render: (percent: number) => (
-        <div style={{ background: getCellColor('planPercent', percent), padding: '4px 8px', borderRadius: 4 }}>
-          <Tag color={percent >= 100 ? 'green' : percent >= 70 ? 'orange' : 'red'}>
-            {percent}%
-          </Tag>
-        </div>
+        <Tag color={percent >= 100 ? 'green' : percent >= 70 ? 'orange' : 'red'}>
+          {percent}%
+        </Tag>
       ),
     },
     {
-      title: () => (
-        <Text onClick={() => handleSort('conversion')}>
-          Конверсия {sortField === 'conversion' && (sortOrder === 'ascend' ? <ArrowUpOutlined /> : <ArrowDownOutlined />)}
-        </Text>
-      ),
+      title: 'Конверсия',
       dataIndex: 'conversion',
       key: 'conversion',
-      sorter: true,
-      render: (conv: number) => (
-        <div style={{ background: getCellColor('conversion', conv), padding: '4px 8px', borderRadius: 4 }}>
-          <Text>{conv.toFixed(1)}%</Text>
-        </div>
-      ),
+      align: 'center',
+      sorter: (a: DealerMetrics, b: DealerMetrics) => a.conversion - b.conversion,
+      render: (conv: number) => <Text>{conv.toFixed(1)}%</Text>,
     },
     {
       title: 'Ср. чек',
       dataIndex: 'avgCheck',
       key: 'avgCheck',
-      render: (v: number) => <Text>{(v / 1000).toFixed(0)}k ₽</Text>,
+      align: 'center',
+      sorter: (a: DealerMetrics, b: DealerMetrics) => (a.avgCheck || 0) - (b.avgCheck || 0),
+      render: (v: number) => v ? <Text>{(v / 1000).toFixed(0)}k ₽</Text> : <Text type="secondary">-</Text>,
     },
     {
-      title: () => (
-        <Text onClick={() => handleSort('margin')}>
-          Маржа {sortField === 'margin' && (sortOrder === 'ascend' ? <ArrowUpOutlined /> : <ArrowDownOutlined />)}
-        </Text>
-      ),
+      title: 'Маржа',
       dataIndex: 'margin',
       key: 'margin',
-      sorter: true,
-      render: (v: number) => (
-        <div style={{ background: getCellColor('margin', v), padding: '4px 8px', borderRadius: 4 }}>
-          <Text>{v.toFixed(1)}%</Text>
-        </div>
-      ),
+      align: 'center',
+      sorter: (a: DealerMetrics, b: DealerMetrics) => (a.margin || 0) - (b.margin || 0),
+      render: (v: number) => <Text>{v ? `${v.toFixed(1)}%` : '-'}</Text>,
     },
     {
       title: 'Дебиторка',
       dataIndex: 'debt',
       key: 'debt',
+      align: 'center',
+      sorter: (a: DealerMetrics, b: DealerMetrics) => (a.debt || 0) - (b.debt || 0),
       render: (v: number) => (
         <Tooltip title={v > 100000 ? 'Превышен порог!' : ''}>
           <Text style={{ color: v > 100000 ? '#ff4d4f' : undefined }}>
@@ -215,16 +194,23 @@ const TerritoryMapTab: React.FC<TerritoryMapTabProps> = ({ dealers: initialDeale
       title: 'Задачи',
       dataIndex: 'taskCount',
       key: 'taskCount',
+      align: 'center',
+      sorter: (a: DealerMetrics, b: DealerMetrics) => a.taskCount - b.taskCount,
       render: (count: number) => count > 0 ? <Tag color="blue">{count}</Tag> : <Text type="secondary">-</Text>,
     },
     {
       title: 'Статус',
-      dataIndex: 'status',
       key: 'status',
-      render: (status: 'green' | 'yellow' | 'red') => {
-        const icons = { green: <CheckCircleOutlined style={{ color: '#52c41a' }} />, yellow: <ClockCircleOutlined style={{ color: '#fa8c16' }} />, red: <WarningOutlined style={{ color: '#ff4d4f' }} /> };
+      align: 'center',
+      sorter: (a: DealerMetrics, b: DealerMetrics) => a.status.localeCompare(b.status),
+      render: (_: unknown, r: DealerMetrics) => {
+        const status = r.status;
         const labels = { green: 'Норма', yellow: 'Внимание', red: 'Проблема' };
-        return <Space>{icons[status]} {labels[status]}</Space>;
+        return (
+          <Tag color={status} icon={status === 'red' ? <WarningOutlined /> : <CheckCircleOutlined />}>
+            {labels[status]}
+          </Tag>
+        );
       },
     },
   ];
@@ -232,92 +218,279 @@ const TerritoryMapTab: React.FC<TerritoryMapTabProps> = ({ dealers: initialDeale
   const redZoneDealers = dealers.filter(d => d.status === 'red');
 
   const renderDetailPanel = () => {
-    if (!detailData) return <Spin />;
+    if (detailLoading) {
+      return <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>;
+    }
+    if (!detailData) return null;
+
+    const months = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+    const now = new Date();
+    const monthLabels: string[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const m = (now.getMonth() - i + 12) % 12;
+      monthLabels.push(months[m]);
+    }
+
+    const history = detailData.sales_history || [];
+    const planHist = detailData.plan_history || [];
+    const maxVal = Math.max(...history, ...planHist, 0.1);
+    const chartHeight = 120;
+
+    // 3-месячная скользящая средняя для линии тренда
+    const trend: (number | null)[] = history.map((_, i) => {
+      if (i < 2) return null;
+      return (history[i] + history[i - 1] + history[i - 2]) / 3;
+    });
+
     return (
-      <Card size="small" title={`${detailData.dealerName} - детализация`} style={{ marginTop: 16 }}>
+      <Card
+        size="small"
+        title={`${detailData.dealer_name} — детализация`}
+        style={{ marginTop: 8 }}
+        extra={
+          <Button
+            type="link"
+            icon={<LinkOutlined />}
+            onClick={() => router.push(`/dealer/${detailData.dealer_id}`)}
+          >
+            Открыть полную карточку
+          </Button>
+        }
+      >
+        <Row gutter={16}>
+          <Col span={8}>
+            <Statistic
+              title="План"
+              value={detailData.plan}
+              formatter={(v: any) => <span style={{ fontSize: 14 }}>{formatRub(Number(v))}</span>}
+            />
+          </Col>
+          <Col span={8}>
+            <Statistic
+              title="Факт"
+              value={detailData.fact}
+              formatter={(v: any) => <span style={{ fontSize: 14, color: detailData.fact > 0 ? '#52c41a' : undefined }}>{formatRub(Number(v))}</span>}
+            />
+          </Col>
+          <Col span={8}>
+            <Statistic
+              title="Выполнение"
+              value={detailData.plan_percent}
+              suffix="%"
+              valueStyle={{ fontSize: 14, color: detailData.plan_percent >= 90 ? '#52c41a' : detailData.plan_percent >= 70 ? '#fa8c16' : '#ff4d4f' }}
+            />
+          </Col>
+        </Row>
+
+        <Divider style={{ margin: '12px 0' }} />
+
         <Row gutter={16}>
           <Col span={12}>
             <Text strong>Продажи по салонам:</Text>
-            <List
-              size="small"
-              dataSource={detailData.salons}
-              renderItem={item => (
-                <List.Item>
-                  <Text>{item.name}</Text>
-                  <Text>{(item.sales / 1000000).toFixed(1)} млн ₽</Text>
-                </List.Item>
-              )}
-            />
+            {detailData.salons.length > 0 ? (
+              <List
+                size="small"
+                dataSource={detailData.salons}
+                style={{ marginTop: 4 }}
+                renderItem={item => (
+                  <List.Item>
+                    <Space direction="vertical" size={0}>
+                      <Text>{item.name}</Text>
+                      {item.manager_name && <Text type="secondary" style={{ fontSize: 11 }}><UserOutlined /> {item.manager_name}</Text>}
+                    </Space>
+                    <Text strong>{formatRub(item.sales)}</Text>
+                  </List.Item>
+                )}
+              />
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет данных" />
+            )}
           </Col>
           <Col span={12}>
             <Text strong>Динамика (6 мес):</Text>
-            <div style={{ display: 'flex', alignItems: 'flex-end', height: 60, gap: 4 }}>
-              {detailData.salesHistory.map((v, i) => (
-                <div key={i} style={{ flex: 1, background: '#1890ff', height: `${(v / 5000)}%`, borderRadius: 2 }} />
-              ))}
-            </div>
-            <Text type="secondary" style={{ fontSize: 11 }}>млн ₽</Text>
+            {history.length > 0 ? (
+              <div style={{ position: 'relative', marginTop: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', height: chartHeight, gap: 3, position: 'relative' }}>
+                  {history.map((v, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        position: 'relative',
+                      }}
+                    >
+                      <div
+                        onMouseEnter={() => setHoveredBar(i)}
+                        onMouseLeave={() => setHoveredBar(null)}
+                        style={{
+                          width: '100%',
+                          background: i === history.length - 1 ? '#52c41a' : '#1890ff',
+                          height: `${Math.max((v / maxVal) * chartHeight, 4)}px`,
+                          borderRadius: '2px 2px 0 0',
+                          minHeight: 4,
+                          cursor: 'pointer',
+                          position: 'relative',
+                          transition: 'opacity 0.15s',
+                          opacity: hoveredBar !== null && hoveredBar !== i ? 0.6 : 1,
+                        }}
+                      />
+                      {planHist[i] > 0 && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            bottom: `${(planHist[i] / maxVal) * chartHeight}px`,
+                            left: 0,
+                            right: 0,
+                            height: 1,
+                            borderTop: '1.5px dashed #ff4d4f',
+                            zIndex: 3,
+                            pointerEvents: 'none',
+                          }}
+                          title={`План: ${formatRub(planHist[i])}`}
+                        />
+                      )}
+                      <Text style={{ fontSize: 9, marginTop: 3, color: '#888' }}>{monthLabels[i]}</Text>
+                      {hoveredBar === i && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            bottom: '100%',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            background: 'rgba(0,0,0,0.85)',
+                            color: '#fff',
+                            padding: '4px 8px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            whiteSpace: 'nowrap',
+                            zIndex: 10,
+                            pointerEvents: 'none',
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          <div>{monthLabels[i]}: {formatRub(v)}</div>
+                          {planHist[i] > 0 && <div style={{ color: '#ff7875' }}>План: {formatRub(planHist[i])}</div>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {trend.some(t => t !== null) && (
+                  <svg
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: chartHeight,
+                      pointerEvents: 'none',
+                      zIndex: 2,
+                    }}
+                  >
+                    {trend.map((t, i) => {
+                      if (t === null) return null;
+                      const x1Pct = ((i + 0.5) / history.length) * 100;
+                      const y1 = chartHeight - (t / maxVal) * chartHeight;
+                      const next = trend[i + 1];
+                      if (next === null || next === undefined) return null;
+                      const x2Pct = ((i + 1.5) / history.length) * 100;
+                      const y2 = chartHeight - (next / maxVal) * chartHeight;
+                      return (
+                        <line
+                          key={i}
+                          x1={`${x1Pct}%`}
+                          y1={y1}
+                          x2={`${x2Pct}%`}
+                          y2={y2}
+                          stroke="#ff85c0"
+                          strokeWidth={2}
+                          strokeDasharray="4 2"
+                        />
+                      );
+                    })}
+                  </svg>
+                )}
+              </div>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет истории" />
+            )}
           </Col>
         </Row>
-        <Row style={{ marginTop: 16 }}>
-          <Col span={24}>
-            <Text strong>Последние алерты:</Text>
-            <List
-              size="small"
-              dataSource={detailData.recentAlerts}
-              renderItem={item => (
-                <List.Item>
-                  <Space>
-                    <AlertOutlined style={{ color: '#ff4d4f' }} />
-                    <Text>{item.title}</Text>
-                    <Text type="secondary">{item.date}</Text>
-                  </Space>
-                </List.Item>
-              )}
-            />
-          </Col>
-        </Row>
-        <Space style={{ marginTop: 16 }}>
-          <a href={`/dealer/${detailData.dealerId}`}><Button icon={<LinkOutlined />}>Перейти к дилеру</Button></a>
-        </Space>
+
+        {detailData.recent_alerts.length > 0 && (
+          <Row style={{ marginTop: 12 }}>
+            <Col span={24}>
+              <Text strong>Последние алерты:</Text>
+              <List
+                size="small"
+                dataSource={detailData.recent_alerts}
+                style={{ marginTop: 4 }}
+                renderItem={item => (
+                  <List.Item>
+                    <Space>
+                      <Tag color={item.priority === 'critical' ? 'red' : item.priority === 'warning' ? 'orange' : 'blue'} style={{ marginRight: 0 }}>
+                        {item.priority}
+                      </Tag>
+                      <AlertOutlined style={{ color: '#fa8c16' }} />
+                      <Text>{item.title}</Text>
+                    </Space>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{item.created_at}</Text>
+                  </List.Item>
+                )}
+              />
+            </Col>
+          </Row>
+        )}
       </Card>
     );
   };
 
   return (
     <div>
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Row gutter={16}>
-          <Col flex="auto">
-            <Search placeholder="Поиск дилера..." allowClear onChange={e => setSearchText(e.target.value)} />
-          </Col>
-          <Col>
-            <Segmented value={statusFilter} onChange={setStatusFilter} options={[
-              { label: 'Все', value: 'all' },
-              { label: 'Проблемные', value: 'problem' },
-              { label: 'Лидеры', value: 'leaders' },
-            ]} />
-          </Col>
-        </Row>
-      </Card>
+      {error && (
+        <Alert
+          message="Ошибка загрузки"
+          description={error}
+          type="error"
+          showIcon
+          closable
+          onClose={() => useTerritoryManagerStore.getState().setError(null)}
+          style={{ marginBottom: 16 }}
+          action={
+            <Button size="small" onClick={() => fetchDealers()}>
+              Повторить
+            </Button>
+          }
+        />
+      )}
 
-      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }} align="middle">
         <Col xs={12} sm={8}>
-          <Card size="small">
+          <Card size="small" style={{ height: '100%' }} bodyStyle={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center' }}>
             <Statistic 
               title="Выполнение плана" 
-              value={territoryTotals.totalFact / 1000000} 
-              prefix="₽ "
-              suffix="млн"
-              valueStyle={{ fontSize: 18 }}
+              value={planCompletionPercent} 
+              suffix="%"
+              precision={1}
+              valueStyle={{ fontSize: 18, color: planCompletionPercent >= 90 ? '#52c41a' : planCompletionPercent >= 70 ? '#fa8c16' : '#ff4d4f' }}
             />
             <Text type="secondary">
-              {planCompletionPercent.toFixed(0)}% <ArrowUpOutlined style={{ color: '#52c41a' }} /> +5% к прошлому месяцу
+              {summary?.planCompletionChange !== undefined && (
+                <>
+                  {summary.planCompletionChange >= 0
+                    ? <ArrowUpOutlined style={{ color: '#52c41a' }} />
+                    : <ArrowDownOutlined style={{ color: '#ff4d4f' }} />}
+                  {' '}{summary.planCompletionChange > 0 ? '+' : ''}{summary.planCompletionChange.toFixed(1)}% к прошлому месяцу
+                </>
+              )}
             </Text>
           </Card>
         </Col>
         <Col xs={12} sm={8}>
-          <Card size="small">
+          <Card size="small" style={{ height: '100%' }} bodyStyle={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center' }}>
             <Statistic 
               title="Прогноз квартала" 
               value={forecastPercent} 
@@ -329,7 +502,7 @@ const TerritoryMapTab: React.FC<TerritoryMapTabProps> = ({ dealers: initialDeale
           </Card>
         </Col>
         <Col xs={12} sm={8}>
-          <Card size="small" style={{ cursor: 'pointer' }} onClick={() => setStatusFilter('problem')}>
+          <Card size="small" style={{ height: '100%', cursor: 'pointer' }} bodyStyle={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center' }} onClick={() => setStatusFilter('problem')}>
             <Statistic 
               title="В красной зоне" 
               value={territoryTotals.redZoneCount} 
@@ -340,18 +513,16 @@ const TerritoryMapTab: React.FC<TerritoryMapTabProps> = ({ dealers: initialDeale
           </Card>
         </Col>
         <Col xs={12} sm={8}>
-          <Card size="small">
+          <Card size="small" style={{ height: '100%' }} bodyStyle={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center' }}>
             <Statistic 
               title="Дебиторская задолженность" 
-              value={territoryTotals.totalDebt / 1000000} 
-              prefix="₽ "
-              suffix="млн"
-              valueStyle={{ fontSize: 18, color: territoryTotals.totalDebt > 500000 ? '#ff4d4f' : undefined }}
+              value={territoryTotals.totalDebt} 
+              formatter={(v: any) => <span style={{ fontSize: 18, color: Number(v) > 500000 ? '#ff4d4f' : undefined }}>{formatRub(Number(v))}</span>}
             />
           </Card>
         </Col>
         <Col xs={12} sm={8}>
-          <Card size="small">
+          <Card size="small" style={{ height: '100%' }} bodyStyle={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center' }}>
             <Statistic 
               title="Конверсия средняя" 
               value={territoryTotals.avgConversion} 
@@ -363,7 +534,7 @@ const TerritoryMapTab: React.FC<TerritoryMapTabProps> = ({ dealers: initialDeale
           </Card>
         </Col>
         <Col xs={12} sm={8}>
-          <Card size="small">
+          <Card size="small" style={{ height: '100%' }} bodyStyle={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center' }}>
             <Statistic 
               title="Маржинальность" 
               value={territoryTotals.avgMargin} 
@@ -396,20 +567,39 @@ const TerritoryMapTab: React.FC<TerritoryMapTabProps> = ({ dealers: initialDeale
         </Collapse>
       )}
 
-      <Card size="small" title="Теплокарта дилер��в">
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Row gutter={16}>
+          <Col flex="auto">
+            <Search placeholder="Поиск дилера..." allowClear onChange={e => setSearchText(e.target.value)} />
+          </Col>
+          <Col>
+            <Segmented value={statusFilter} onChange={setStatusFilter} options={[
+              { label: 'Все', value: 'all' },
+              { label: 'Проблемные', value: 'problem' },
+              { label: 'Лидеры', value: 'leaders' },
+            ]} />
+          </Col>
+        </Row>
+      </Card>
+
+      <Card title="Теплокарта дилеров">
         <Table
-          dataSource={sortedDealers}
+          dataSource={filteredDealers}
           columns={columns}
           rowKey="dealerId"
-          size="small"
-          loading={initialLoading}
-          pagination={{ pageSize: 10 }}
+          loading={tableLoading}
+          pagination={false}
+          onRow={(record: DealerMetrics) => ({
+            style: { background: getRowHeat(record.status) },
+          })}
+          locale={{ emptyText: <Empty description="Нет дилеров в территории" /> }}
           expandable={{
             expandedRowRender: () => renderDetailPanel(),
             rowExpandable: () => true,
+            expandRowByClick: true,
           }}
-          expandedRowKeys={[expandedDealer]}
-          onExpand={(expanded, record) => handleExpand(record.dealerId)}
+          expandedRowKeys={expandedDealer ? [expandedDealer] : []}
+          onExpand={(_expanded, record) => handleExpand(record.dealerId)}
         />
       </Card>
     </div>

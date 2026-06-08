@@ -1,25 +1,17 @@
-// src/components/Dashboard/tabs/CommunicationsTab.tsx
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Card, Row, Col, Table, Tag, Button, Space, Modal, Form, Input, Select, InputNumber, Progress, Timeline, Typography, Empty, Spin, DatePicker, message, Statistic, notification, Badge } from 'antd';
+import { Card, Row, Col, Table, Tag, Button, Space, Modal, Form, Input, Select, InputNumber, Progress, Typography, Empty, Spin, message, Statistic, notification, Badge } from 'antd';
 import { 
-  CheckCircleOutlined, 
-  ClockCircleOutlined, 
-  ExclamationCircleOutlined, 
   PlusOutlined, 
   CommentOutlined,
-  DollarOutlined,
-  SendOutlined,
   FileTextOutlined,
-  AlertOutlined,
   BellOutlined,
-  WifiOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import apiClient from '@/api/axiosClient';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 const { Option } = Select;
 const { TextArea } = Input;
-const { RangePicker } = DatePicker;
 
 export type TaskStatus = 'new' | 'in_progress' | 'done' | 'overdue';
 export type TaskPriority = 'high' | 'medium' | 'low';
@@ -71,21 +63,7 @@ interface MarketingBudget {
   items: BudgetItem[];
 }
 
-interface CommunicationsTabProps {
-  tasks?: Task[];
-  requests?: Request[];
-  marketingBudget?: MarketingBudget;
-  interactions?: Interaction[];
-  loading?: boolean;
-}
-
-const CommunicationsTab: React.FC<CommunicationsTabProps> = ({
-  tasks: initialTasks = [],
-  requests: initialRequests = [],
-  marketingBudget,
-  interactions = [],
-  loading = false,
-}) => {
+const CommunicationsTab: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'tasks' | 'requests' | 'budget' | 'history'>('tasks');
   const [requestModalOpen, setRequestModalOpen] = useState(false);
   const [commentModalOpen, setCommentModalOpen] = useState(false);
@@ -95,17 +73,35 @@ const CommunicationsTab: React.FC<CommunicationsTabProps> = ({
   const [form] = Form.useForm();
   const [commentForm] = Form.useForm();
   const wsRef = useRef<WebSocket | null>(null);
+  const wsRetriesRef = useRef(0);
+  const maxRetries = 3;
   const [wsConnected, setWsConnected] = useState(false);
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
-  const [requests, setRequests] = useState<Request[]>(initialRequests);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [requests, setRequests] = useState<Request[]>([]);
+  const [marketingBudget, setMarketingBudget] = useState<MarketingBudget | undefined>(undefined);
+  const [interactions] = useState<Interaction[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setTasks(initialTasks);
-  }, [initialTasks]);
-
-  useEffect(() => {
-    setRequests(initialRequests);
-  }, [initialRequests]);
+    const fetchAll = async () => {
+      setLoading(true);
+      try {
+        const [tasksRes, requestsRes, budgetRes] = await Promise.all([
+          apiClient.get('/dealer/tasks'),
+          apiClient.get('/dealer/requests'),
+          apiClient.get('/dealer/marketing-budget'),
+        ]);
+        setTasks(tasksRes.data?.tasks || []);
+        setRequests(requestsRes.data?.requests || []);
+        setMarketingBudget(budgetRes.data || undefined);
+      } catch (e) {
+        console.error('Failed to fetch communications data', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAll();
+  }, []);
 
   useEffect(() => {
     const connectWebSocket = () => {
@@ -115,7 +111,7 @@ const CommunicationsTab: React.FC<CommunicationsTabProps> = ({
         
         wsRef.current.onopen = () => {
           setWsConnected(true);
-          console.log('WebSocket connected');
+          wsRetriesRef.current = 0;
         };
         
         wsRef.current.onmessage = (event) => {
@@ -129,7 +125,13 @@ const CommunicationsTab: React.FC<CommunicationsTabProps> = ({
         
         wsRef.current.onclose = () => {
           setWsConnected(false);
-          setTimeout(connectWebSocket, 5000);
+          if (wsRetriesRef.current < maxRetries) {
+            wsRetriesRef.current += 1;
+            const delay = Math.pow(2, wsRetriesRef.current - 1) * 1000;
+            setTimeout(connectWebSocket, delay);
+          } else {
+            console.error('WebSocket max retries reached');
+          }
         };
         
         wsRef.current.onerror = (error) => {
@@ -190,7 +192,31 @@ const CommunicationsTab: React.FC<CommunicationsTabProps> = ({
   };
 
   const handleTaskStatusChange = async (taskId: string, newStatus: TaskStatus) => {
+    const prev = tasks;
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+    try {
+      await apiClient.patch(`/dealer/tasks/${taskId}`, { status: newStatus });
+    } catch (e) {
+      setTasks(prev);
+      message.error('Не удалось обновить задачу');
+    }
+  };
+
+  const handleCreateRequest = async () => {
+    try {
+      const values = await form.validateFields();
+      await apiClient.post('/dealer/requests', values);
+      message.success('Запрос отправлен');
+      setRequestModalOpen(false);
+      form.resetFields();
+      const { data } = await apiClient.get('/dealer/requests');
+      setRequests(data || []);
+    } catch (e) {
+      if (e instanceof Error || typeof e === 'object') {
+        return;
+      }
+      message.error('Ошибка при отправке запроса');
+    }
   };
 
   const filteredTasks = useMemo(() => {
@@ -338,7 +364,7 @@ const CommunicationsTab: React.FC<CommunicationsTabProps> = ({
   const budgetTableColumns = [
     { title: 'Дата', dataIndex: 'date', key: 'date', width: 100 },
     { title: 'Назначение', dataIndex: 'purpose', key: 'purpose', width: 200 },
-    { title: 'Сум��а', dataIndex: 'amount', key: 'amount', render: (val: number) => <Text>{val.toLocaleString()} ₽</Text> },
+    { title: 'Сумма', dataIndex: 'amount', key: 'amount', render: (val: number) => <Text>{val.toLocaleString()} ₽</Text> },
     { title: 'Статус', dataIndex: 'status', key: 'status', width: 120, render: (val: string) => <Tag color={val === 'approved' ? 'green' : val === 'pending' ? 'orange' : 'red'}>{val}</Tag> },
   ];
 
@@ -427,7 +453,7 @@ const CommunicationsTab: React.FC<CommunicationsTabProps> = ({
             title="Создать запрос"
             open={requestModalOpen}
             onCancel={() => setRequestModalOpen(false)}
-            onOk={() => { form.validateFields().then(() => { message.success('Запрос отправлен'); setRequestModalOpen(false); }); }}
+            onOk={handleCreateRequest}
           >
             <Form form={form} layout="vertical">
               <Form.Item name="type" label="Тип запроса" rules={[{ required: true }]}>
@@ -479,7 +505,7 @@ const CommunicationsTab: React.FC<CommunicationsTabProps> = ({
             </Col>
           </Row>
           <Card title="Детализация трат" style={{ marginTop: 16 }}>
-            {marketingBudget?.items.length ? (
+            {marketingBudget?.items?.length ? (
               <Table dataSource={marketingBudget.items} columns={budgetTableColumns} rowKey="id" pagination={{ pageSize: 5 }} />
             ) : (
               <Empty description="Нет данных о тратах" />

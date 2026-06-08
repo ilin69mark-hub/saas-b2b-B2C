@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -460,7 +461,7 @@ func (h *KPIHandler) MarkAlertRead(c *gin.Context) {
 		return
 	}
 
-	if err := h.alertSvc.MarkAsRead(c.Request.Context(), user.ID, alertID); err != nil {
+	if err := h.alertSvc.MarkAsReadNotification(c.Request.Context(), user.ID, alertID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -534,8 +535,10 @@ func (h *KPIHandler) GetDealerFunnel(c *gin.Context) {
 
 	dateStr := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
 	period := c.DefaultQuery("period", "month")
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
 
-	data, err := h.kpiSvc.GetDealerFunnel(c.Request.Context(), user.ID, period, dateStr)
+	data, err := h.kpiSvc.GetDealerFunnel(c.Request.Context(), user.ID, period, dateStr, startDateStr, endDateStr)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -551,13 +554,42 @@ func (h *KPIHandler) GetDealerProducts(c *gin.Context) {
 		return
 	}
 
-	dateStr := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
-	data, err := h.kpiSvc.GetDealerProducts(c.Request.Context(), user.ID, dateStr)
+	period := c.DefaultQuery("period", "month")
+	dateStr := c.DefaultQuery("date", "")
+	salonIDStr := c.DefaultQuery("salon_id", "")
+	startDateStr := c.DefaultQuery("start_date", "")
+	endDateStr := c.DefaultQuery("end_date", "")
+
+	data, err := h.kpiSvc.GetDealerProducts(c.Request.Context(), user.ID, period, dateStr, startDateStr, endDateStr, salonIDStr)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, data)
+}
+
+func (h *KPIHandler) GetDealerProductsExport(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+
+	period := c.DefaultQuery("period", "month")
+	dateStr := c.DefaultQuery("date", "")
+	salonIDStr := c.DefaultQuery("salon_id", "")
+	startDateStr := c.DefaultQuery("start_date", "")
+	endDateStr := c.DefaultQuery("end_date", "")
+
+	pdfData, err := h.kpiSvc.GenerateDealerProductsPDF(c.Request.Context(), user.ID, period, dateStr, startDateStr, endDateStr, salonIDStr)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Disposition", "attachment; filename=products_stock.pdf")
+	c.Data(http.StatusOK, "application/pdf", pdfData)
 }
 
 // GetFranchiserSummary - сводка для франчайзера (все дилеры)
@@ -642,8 +674,12 @@ func (h *KPIHandler) GetTerritorySummary(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
 		return
 	}
+	if err := requireTerritoryManagerRole(user); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
 
-	dateStr := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
+	dateStr := c.DefaultQuery("date", "")
 	data, err := h.kpiSvc.GetTerritorySummary(c.Request.Context(), user.ID, dateStr)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -659,11 +695,42 @@ func (h *KPIHandler) GetTerritoryFunnel(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
 		return
 	}
+	if err := requireTerritoryManagerRole(user); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
 
 	period := c.DefaultQuery("period", "month")
-	dateStr := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
 
-	data, err := h.kpiSvc.GetTerritoryFunnel(c.Request.Context(), user.ID, period, dateStr)
+	if startDateStr == "" && endDateStr == "" && !validatePeriod(period) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid period, use: week, month, quarter, year, custom"})
+		return
+	}
+
+	var startDt, endDt time.Time
+	if startDateStr != "" && endDateStr != "" {
+		startDt, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid start_date format, use YYYY-MM-DD"})
+			return
+		}
+		endDt, err = time.Parse("2006-01-02", endDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid end_date format, use YYYY-MM-DD"})
+			return
+		}
+		if endDt.Before(startDt) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "end_date must be after start_date"})
+			return
+		}
+		period = "custom"
+	}
+
+	dateStr := c.DefaultQuery("date", "")
+
+	data, err := h.kpiSvc.GetTerritoryFunnel(c.Request.Context(), user.ID, period, dateStr, startDt, endDt)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -678,14 +745,138 @@ func (h *KPIHandler) GetTerritoryPlanFact(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
 		return
 	}
+	if err := requireTerritoryManagerRole(user); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
 
 	period := c.DefaultQuery("period", "month")
-	data, err := h.kpiSvc.GetTerritoryPlanFact(c.Request.Context(), user.ID, period)
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+
+	if startDateStr == "" && endDateStr == "" && !validatePeriod(period) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid period, use: week, month, quarter, custom"})
+		return
+	}
+
+	var startDt, endDt time.Time
+	if startDateStr != "" && endDateStr != "" {
+		startDt, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid start_date format, use YYYY-MM-DD"})
+			return
+		}
+		endDt, err = time.Parse("2006-01-02", endDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid end_date format, use YYYY-MM-DD"})
+			return
+		}
+		if endDt.Before(startDt) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "end_date must be after start_date"})
+			return
+		}
+		period = "custom"
+	}
+
+	data, err := h.kpiSvc.GetTerritoryPlanFact(c.Request.Context(), user.ID, period, startDt, endDt)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, data)
+}
+
+// UpdateTerritoryDeviation - сохранение причины/действий отклонения
+func (h *KPIHandler) UpdateTerritoryDeviation(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+	if err := requireTerritoryManagerRole(user); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	var req struct {
+		DealerID string `json:"dealer_id" binding:"required"`
+		Period   string `json:"period" binding:"required"`
+		Reason   string `json:"reason"`
+		Actions  string `json:"actions"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	dealerID, err := uuid.Parse(req.DealerID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid dealer_id"})
+		return
+	}
+
+	// Проверка, что дилер принадлежит территории менеджера
+	var dealer models.User
+	if err := h.db.First(&dealer, "id = ? AND role = ? AND managed_by = ?", dealerID, models.RoleDealer, user.ID).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Dealer not found or not in your territory"})
+		return
+	}
+
+	err = h.kpiSvc.UpdateTerritoryDeviation(c.Request.Context(), dealerID, req.Period, req.Reason, req.Actions)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Deviation saved"})
+}
+
+// GetTerritoryPlanFactPDF - сгенерировать PDF отчёт по план-факту
+func (h *KPIHandler) GetTerritoryPlanFactPDF(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+	if err := requireTerritoryManagerRole(user); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	period := c.DefaultQuery("period", "month")
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+
+	var startDt, endDt time.Time
+	if startDateStr != "" && endDateStr != "" {
+		startDt, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid start_date format, use YYYY-MM-DD"})
+			return
+		}
+		endDt, err = time.Parse("2006-01-02", endDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid end_date format, use YYYY-MM-DD"})
+			return
+		}
+		if endDt.Before(startDt) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "end_date must be after start_date"})
+			return
+		}
+		period = "custom"
+	}
+
+	pdfData, err := h.kpiSvc.GenerateTerritoryPlanFactPDF(c.Request.Context(), user.ID, period, startDt, endDt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	filename := period
+	if period == "custom" {
+		filename = startDateStr + "_" + endDateStr
+	}
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=planfact_%s.pdf", filename))
+	c.Data(http.StatusOK, "application/pdf", pdfData)
 }
 
 // GetTerritoryCommunications - коммуникации
@@ -695,13 +886,122 @@ func (h *KPIHandler) GetTerritoryCommunications(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
 		return
 	}
+	if err := requireTerritoryManagerRole(user); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
 
-	data, err := h.kpiSvc.GetTerritoryCommunications(c.Request.Context(), user.ID)
+	period := c.DefaultQuery("period", "month")
+	startStr := c.Query("start_date")
+	endStr := c.Query("end_date")
+
+	if period == "custom" && startStr != "" && endStr != "" {
+		startDate, err1 := time.Parse("2006-01-02", startStr)
+		endDate, err2 := time.Parse("2006-01-02", endStr)
+		if err1 == nil && err2 == nil {
+			data, err := h.kpiSvc.GetTerritoryCommunications(c.Request.Context(), user.ID, period, startDate, endDate)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, data)
+			return
+		}
+	}
+
+	data, err := h.kpiSvc.GetTerritoryCommunications(c.Request.Context(), user.ID, period)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, data)
+}
+
+// CreateTerritoryTask - создать задачу для дилера
+func (h *KPIHandler) CreateTerritoryTask(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+	if err := requireTerritoryManagerRole(user); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	var req struct {
+		DealerID    string `json:"dealer_id" binding:"required"`
+		Title       string `json:"title" binding:"required"`
+		Description string `json:"description"`
+		DueDate     string `json:"due_date"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	dealerID, err := uuid.Parse(req.DealerID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid dealer_id"})
+		return
+	}
+
+	var dealer models.User
+	if err := h.db.First(&dealer, "id = ? AND role = ? AND managed_by = ?", dealerID, models.RoleDealer, user.ID).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Dealer not found or not in your territory"})
+		return
+	}
+
+	task, err := h.kpiSvc.CreateTerritoryTask(c.Request.Context(), dealerID, user.ID, req.Title, req.Description, req.DueDate)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, task)
+}
+
+// CreateTerritoryInteraction - создать контакт с дилером
+func (h *KPIHandler) CreateTerritoryInteraction(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+	if err := requireTerritoryManagerRole(user); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	var req struct {
+		DealerID    string `json:"dealer_id" binding:"required"`
+		Type        string `json:"type" binding:"required"`
+		Date        string `json:"date"`
+		Description string `json:"description"`
+		Result      string `json:"result"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	dealerID, err := uuid.Parse(req.DealerID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid dealer_id"})
+		return
+	}
+
+	var dealer models.User
+	if err := h.db.First(&dealer, "id = ? AND role = ? AND managed_by = ?", dealerID, models.RoleDealer, user.ID).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Dealer not found or not in your territory"})
+		return
+	}
+
+	interaction, err := h.kpiSvc.CreateTerritoryInteraction(c.Request.Context(), dealerID, user.ID, req.Type, req.Description, req.Result, req.Date)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, interaction)
 }
 
 // GetTerritoryBenchmarks - бенчмарки
@@ -711,8 +1011,30 @@ func (h *KPIHandler) GetTerritoryBenchmarks(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
 		return
 	}
+	if err := requireTerritoryManagerRole(user); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
 
-	data, err := h.kpiSvc.GetTerritoryBenchmarks(c.Request.Context(), user.ID)
+	period := c.DefaultQuery("period", "month")
+	startStr := c.Query("start_date")
+	endStr := c.Query("end_date")
+
+	if period == "custom" && startStr != "" && endStr != "" {
+		startDate, err1 := time.Parse("2006-01-02", startStr)
+		endDate, err2 := time.Parse("2006-01-02", endStr)
+		if err1 == nil && err2 == nil {
+			data, err := h.kpiSvc.GetTerritoryBenchmarks(c.Request.Context(), user.ID, period, startDate, endDate)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, data)
+			return
+		}
+	}
+
+	data, err := h.kpiSvc.GetTerritoryBenchmarks(c.Request.Context(), user.ID, period)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -758,6 +1080,35 @@ func (h *KPIHandler) UpdateDealerTask(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Task updated"})
+}
+
+// GetDealerDetails - детализация дилера (preview-режим)
+// Доступ: franchiser_manager (только дилеры его территории), franchiser, super_admin
+func (h *KPIHandler) GetDealerDetails(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+
+	if user.Role != models.RoleFranchisorManager && user.Role != models.RoleFranchisor && user.Role != models.RoleSuperAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	dealerIDStr := c.Param("id")
+	dealerID, err := uuid.Parse(dealerIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid dealer id"})
+		return
+	}
+
+	data, err := h.kpiSvc.GetDealerDetails(c.Request.Context(), user.ID, dealerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, data)
 }
 
 // === Dealer Requests Handlers ===
@@ -915,7 +1266,7 @@ func (h *KPIHandler) GetFranchiserAlerts(c *gin.Context) {
 	}
 	notifRepo := repository.NewNotificationRepository(h.db)
 	notifSvc := services.NewNotificationService(notifRepo)
-	
+
 	var tenantID uuid.UUID
 	if user.TenantID != nil {
 		tenantID = *user.TenantID
@@ -925,7 +1276,13 @@ func (h *KPIHandler) GetFranchiserAlerts(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"alerts": data, "unread_count": len(data)})
+	unreadCount := 0
+	for _, n := range data {
+		if !n.IsRead {
+			unreadCount++
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"alerts": data, "unread_count": unreadCount})
 }
 
 // GetTerritoriesHeatmap - тепловая карта территорий
@@ -1362,4 +1719,102 @@ func (h *KPIHandler) GetDraft(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, data)
+}
+
+// GetDealerExpenses - получение расходов дилера за месяц
+func (h *KPIHandler) GetDealerExpenses(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+
+	month := c.DefaultQuery("month", time.Now().Format("2006-01"))
+	data, err := h.kpiSvc.GetDealerExpenses(c.Request.Context(), user.ID, month)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, data)
+}
+
+// SaveDealerExpenses - сохранение расходов дилера (upsert)
+func (h *KPIHandler) SaveDealerExpenses(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+
+	var req struct {
+		Month         string  `json:"month"`
+		Rent          float64 `json:"rent"`
+		Utilities     float64 `json:"utilities"`
+		Payroll       float64 `json:"payroll"`
+		Taxes         float64 `json:"taxes"`
+		Logistics     float64 `json:"logistics"`
+		Marketing     float64 `json:"marketing"`
+		Defects       float64 `json:"defects"`
+		OtherExpenses float64 `json:"other_expenses"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.kpiSvc.SaveDealerExpenses(c.Request.Context(), user.ID, req.Month, req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// GetUnitTemplates - список шаблонов unit-экономики
+func (h *KPIHandler) GetUnitTemplates(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+	templates, err := h.kpiSvc.GetUnitTemplates(c.Request.Context(), user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, templates)
+}
+
+// CreateUnitTemplate - создать шаблон unit-экономики
+func (h *KPIHandler) CreateUnitTemplate(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+	var req models.UnitTemplateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	template, err := h.kpiSvc.CreateUnitTemplate(c.Request.Context(), user.ID, req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, template)
+}
+
+// DeleteUnitTemplate - удалить шаблон unit-экономики
+func (h *KPIHandler) DeleteUnitTemplate(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+	id := c.Param("id")
+	if err := h.kpiSvc.DeleteUnitTemplate(c.Request.Context(), user.ID, id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

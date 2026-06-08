@@ -55,7 +55,7 @@ const ExpenseFormTab: React.FC<ExpenseFormTabProps> = ({ onSave, onImport }) => 
     setLoading(true);
     try {
       const token = localStorage.getItem('accessToken');
-      const res = await fetch(`/api/dealer/expenses?month=${monthStr}`, {
+      const res = await fetch(`/api/v1/dealer/expenses?month=${monthStr}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -65,7 +65,7 @@ const ExpenseFormTab: React.FC<ExpenseFormTabProps> = ({ onSave, onImport }) => 
       } else {
         setInitialData(null);
         form.resetFields();
-        const prevRes = await fetch(`/api/dealer/expenses?month=${dayjs(selectedMonth).subtract(1, 'month').format('YYYY-MM')}`, {
+        const prevRes = await fetch(`/api/v1/dealer/expenses?month=${dayjs(selectedMonth).subtract(1, 'month').format('YYYY-MM')}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (prevRes.ok) {
@@ -145,7 +145,7 @@ const ExpenseFormTab: React.FC<ExpenseFormTabProps> = ({ onSave, onImport }) => 
         await onSave(payload);
       } else {
         const token = localStorage.getItem('accessToken');
-        const res = await fetch('/api/dealer/expenses', {
+        const res = await fetch('/api/v1/dealer/expenses', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -182,7 +182,7 @@ const ExpenseFormTab: React.FC<ExpenseFormTabProps> = ({ onSave, onImport }) => 
         formData.append('file', file);
         
         const token = localStorage.getItem('accessToken');
-        const res = await fetch('/api/dealer/expenses/import', {
+        const res = await fetch('/api/v1/dealer/expenses/import', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
           body: formData,

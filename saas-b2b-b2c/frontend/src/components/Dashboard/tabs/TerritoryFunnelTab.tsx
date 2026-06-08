@@ -1,299 +1,242 @@
-// src/components/Dashboard/tabs/TerritoryFunnelTab.tsx
 import React, { useState, useMemo, useEffect } from 'react';
-import { Card, Row, Col, Typography, Table, Tag, Space, Statistic, Select, Button, List, Collapse, Tooltip, Segmented, Spin, Empty } from 'antd';
-import { UserAddOutlined, ShopOutlined, DollarOutlined, PercentageOutlined, RiseOutlined, FallOutlined, WarningOutlined, AlertOutlined, SearchOutlined, LineChartOutlined, TableOutlined, UserOutlined, ArrowRightOutlined } from '@ant-design/icons';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
-import { useTerritoryManagerStore, DealerMetrics } from '@/store/territoryManagerStore';
+import { Card, Row, Col, Typography, Table, Tag, Space, Statistic, Select, List, Collapse, Spin, Empty, Alert, DatePicker } from 'antd';
+import { UserAddOutlined, RiseOutlined, FallOutlined, WarningOutlined } from '@ant-design/icons';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Cell, LabelList } from 'recharts';
+import { useTerritoryManagerStore } from '@/store/territoryManagerStore';
+import dayjs from 'dayjs';
 
 const { Text } = Typography;
-
-interface Anomaly {
-  id: string;
-  dealerName: string;
-  storeName?: string;
-  type: 'conversion_drop' | 'avg_check' | 'traffic_drop' | 'refusal_rate';
-  description: string;
-  date: string;
-  severity: 'warning' | 'critical';
-}
-
-interface StoreFunnel {
-  storeId: string;
-  storeName: string;
-  traffic: number;
-  consultation: number;
-  measurement: number;
-  kp: number;
-  contract: number;
-  payment: number;
-  conversion: number;
-}
-
-interface ManagerFunnel {
-  managerId: string;
-  managerName: string;
-  traffic: number;
-  consultation: number;
-  measurement: number;
-  kp: number;
-  contract: number;
-  payment: number;
-  conversion: number;
-  history: number[];
-}
 
 interface TerritoryFunnelTabProps {
   loading?: boolean;
 }
 
-const STAGES = ['Трафик', 'Консультация', 'Замер', 'КП', 'Договор', 'Оплата'];
+const STAGE_COLORS = ['#1890ff', '#52c41a', '#fa8c16', '#ff4d4f'];
+
+const formatRub = (v: number) => Math.round(v).toLocaleString('ru-RU') + ' ₽';
 
 const TerritoryFunnelTab: React.FC<TerritoryFunnelTabProps> = ({ loading }) => {
-  const { summary } = useTerritoryManagerStore();
+  const { fetchFunnel, error: storeError } = useTerritoryManagerStore();
   const [period, setPeriod] = useState('month');
-  const [selectedDealers, setSelectedDealers] = useState<string[]>(['1', '2', '3']);
-  const [chartMode, setChartMode] = useState<'absolute' | 'conversion_step' | 'conversion_traffic'>('conversion_traffic');
-  const [anomalyFilter, setAnomalyFilter] = useState<string>('all');
-  const [selectedDealer, setSelectedDealer] = useState<string | null>(null);
-  const [expandedStore, setExpandedStore] = useState<string | null>(null);
-  const [selectedStore, setSelectedStore] = useState<string | null>(null);
+  const [customDateRange, setCustomDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  const [funnelData, setFunnelData] = useState<any>(null);
+  const [funnelLoading, setFunnelLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const { RangePicker } = DatePicker;
 
-  const funnelByDealer = useMemo(() => [
-    { dealerId: '1', dealerName: 'Мебель Москва', data: [450, 270, 180, 108, 54, 45] },
-    { dealerId: '2', dealerName: 'Диванит Воронеж', data: [320, 192, 128, 77, 38, 32] },
-    { dealerId: '3', dealerName: 'МебельЛига', data: [180, 108, 72, 43, 22, 18] },
-    { dealerId: '4', dealerName: 'Евромебель', data: [250, 150, 100, 60, 30, 25] },
-  ], []);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setFunnelLoading(true);
+      setFetchError(null);
+      try {
+        let data;
+        if (period === 'custom' && customDateRange?.[0] && customDateRange?.[1]) {
+          data = await fetchFunnel('custom', customDateRange[0].format('YYYY-MM-DD'), customDateRange[1].format('YYYY-MM-DD'));
+        } else {
+          data = await fetchFunnel(period);
+        }
+        if (!cancelled && data) {
+          setFunnelData(data);
+        } else if (!cancelled) {
+          setFunnelData(null);
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          const msg = e?.message || 'Ошибка загрузки данных воронки';
+          setFetchError(msg);
+          setFunnelData(null);
+        }
+      } finally {
+        if (!cancelled) setFunnelLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [period, customDateRange, fetchFunnel]);
 
-  const chartData = useMemo(() => {
-    return STAGES.map((stage, i) => {
-      const point: any = { name: stage };
-      funnelByDealer
-        .filter(d => selectedDealers.includes(d.dealerId))
-        .forEach(d => {
-          if (chartMode === 'absolute') {
-            point[d.dealerName] = d.data[i];
-          } else if (chartMode === 'conversion_step') {
-            point[d.dealerName] = i > 0 ? Math.round((d.data[i] / d.data[i - 1]) * 100) : 100;
-          } else {
-            point[d.dealerName] = Math.round((d.data[i] / d.data[0]) * 100);
-          }
-        });
-      return point;
-    });
-  }, [funnelByDealer, selectedDealers, chartMode]);
+  const handlePeriodChange = (value: string) => {
+    setPeriod(value);
+    if (value !== 'custom') {
+      setCustomDateRange(null);
+    }
+  };
 
-  const anomalies = useMemo((): Anomaly[] => [
-    { id: '1', dealerName: 'Мебель Москва', storeName: 'Салон 1', type: 'conversion_drop', description: 'Падение конверсии Замер→КП на 15%', date: '2026-04-28', severity: 'warning' },
-    { id: '2', dealerName: 'МебельЛига', type: 'avg_check', description: 'Рост среднего чека при падении кол-ва продаж (+25%, -18%)', date: '2026-04-27', severity: 'critical' },
-    { id: '3', dealerName: 'Диванит Воронеж', type: 'traffic_drop', description: 'Падение трафика на 22%', date: '2026-04-26', severity: 'warning' },
-    { id: '4', dealerName: 'Евромебель', storeName: 'Салон 1', type: 'refusal_rate', description: 'Рост отказов "нет в наличии" на 12%', date: '2026-04-25', severity: 'critical' },
-    { id: '5', dealerName: 'Мебель Москва', type: 'traffic_drop', description: 'Падение трафика на 8%', date: '2026-04-24', severity: 'warning' },
-  ], []);
+  const handleRangeChange = (dates: any) => {
+    if (dates && dates[0] && dates[1]) {
+      setCustomDateRange([dates[0], dates[1]]);
+    }
+  };
 
-  const filteredAnomalies = useMemo(() => {
-    return anomalies.filter(a => {
-      if (anomalyFilter === 'all') return true;
-      return a.type === anomalyFilter;
-    });
-  }, [anomalies, anomalyFilter]);
+  const stages = funnelData?.stages || [];
+  const totalLeads = funnelData?.total_leads || 0;
+  const lostLeads = funnelData?.lost_leads || [];
+  const saleCount = stages.find((s: any) => s.stage === 'sale')?.count || 0;
+  const saleConv = totalLeads > 0 ? ((saleCount / totalLeads) * 100).toFixed(1) : '0';
+  const lostCount = totalLeads - saleCount;
 
-  const storesFunnel = useMemo((): StoreFunnel[] => [
-    { storeId: '1', storeName: 'Салон 1', traffic: 180, consultation: 108, measurement: 72, kp: 43, contract: 22, payment: 18, conversion: 10 },
-    { storeId: '2', storeName: 'Салон 2', traffic: 150, consultation: 90, measurement: 60, kp: 36, contract: 18, payment: 15, conversion: 10 },
-    { storeId: '3', storeName: 'Салон 3', traffic: 120, consultation: 72, measurement: 48, kp: 29, contract: 14, payment: 12, conversion: 10 },
-  ], []);
+  const funnelChartData = useMemo(() => {
+    return stages.map((s: any) => ({
+      name: s.label,
+      count: s.count,
+      conversion: s.conversion,
+    }));
+  }, [stages]);
 
-  const managersFunnel = useMemo((): ManagerFunnel[] => [
-    { managerId: '1', managerName: 'Иванов А.А.', traffic: 80, consultation: 56, measurement: 42, kp: 28, contract: 16, payment: 12, conversion: 15, history: [12, 14, 13, 15, 16, 14] },
-    { managerId: '2', managerName: 'Петрова С.С.', traffic: 70, consultation: 49, measurement: 35, kp: 21, contract: 10, payment: 8, conversion: 11, history: [10, 11, 9, 12, 10, 11] },
-    { managerId: '3', managerName: 'Сидоров В.В.', traffic: 30, consultation: 21, measurement: 14, kp: 8, contract: 4, payment: 3, conversion: 10, history: [8, 9, 7, 6, 5, 10] },
-  ], []);
-
-  const storeColumns = [
-    { title: 'Салон', dataIndex: 'storeName', key: 'storeName', render: (name: string) => <Space><ShopOutlined />{name}</Space> },
-    { title: 'Трафик', dataIndex: 'traffic', key: 'traffic' },
-    { title: 'Консультация', dataIndex: 'consultation', key: 'consultation' },
-    { title: 'Замер', dataIndex: 'measurement', key: 'measurement' },
-    { title: 'КП', dataIndex: 'kp', key: 'kp' },
-    { title: 'Договор', dataIndex: 'contract', key: 'contract' },
-    { title: 'Оплата', dataIndex: 'payment', key: 'payment' },
-    { title: 'Конверсия', dataIndex: 'conversion', key: 'conversion', render: (c: number) => <Tag color={c >= 10 ? 'green' : c >= 7 ? 'orange' : 'red'}>{c}%</Tag> },
+  const stageColumns = [
+    { title: 'Этап', dataIndex: 'name', key: 'name', render: (name: string) => <Text strong>{name}</Text> },
+    { title: 'Количество', dataIndex: 'count', key: 'count', render: (count: number) => count > 0 ? count : '-' },
+    { title: 'Конверсия', dataIndex: 'conversion', key: 'conversion', render: (conv: number, _: any, i: number) => i > 0 ? `${conv.toFixed(1)}%` : '100%' },
   ];
-
-  const managerColumns = [
-    { title: 'Менеджер', dataIndex: 'managerName', key: 'managerName', render: (name: string) => <Space><UserOutlined />{name}</Space> },
-    { title: 'Трафик', dataIndex: 'traffic', key: 'traffic' },
-    { title: 'Консультация', dataIndex: 'consultation', key: 'consultation' },
-    { title: 'Замер', dataIndex: 'measurement', key: 'measurement' },
-    { title: 'КП', dataIndex: 'kp', key: 'kp' },
-    { title: 'Договор', dataIndex: 'contract', key: 'contract' },
-    { title: 'Оплата', dataIndex: 'payment', key: 'payment' },
-    { title: 'Конверсия', dataIndex: 'conversion', key: 'conversion', render: (c: number, r: ManagerFunnel) => <Tag color={r.conversion >= 12 ? 'green' : r.conversion >= 8 ? 'orange' : 'red'}>{c}%</Tag> },
-    { title: 'История', key: 'history', render: (_: any, r: ManagerFunnel) => (
-      <div style={{ display: 'flex', alignItems: 'flex-end', height: 24, gap: 2, width: 80 }}>
-        {r.history.map((v, i) => (
-          <div key={i} style={{ flex: 1, background: v >= 10 ? '#52c41a' : v >= 7 ? '#fa8c16' : '#ff4d4f', height: `${v * 2}%`, borderRadius: 1 }} />
-        ))}
-      </div>
-    ) },
-  ];
-
-  const anomalyColumns = [
-    { title: 'Дилер', dataIndex: 'dealerName', key: 'dealerName', render: (n: string, r: Anomaly) => <Space>{r.storeName && <ShopOutlined />}{n}</Space> },
-    { title: 'Тип аномалии', dataIndex: 'type', key: 'type', render: (t: string) => {
-      const types: Record<string, string> = { conversion_drop: 'Падение конверсии', avg_check: 'Средний чек', traffic_drop: 'Падение трафика', refusal_rate: 'Отказы' };
-      return types[t];
-    }},
-    { title: 'Описание', dataIndex: 'description', key: 'description' },
-    { title: 'Дата', dataIndex: 'date', key: 'date' },
-    { title: '', dataIndex: 'severity', key: 'severity', render: (s: string) => s === 'critical' ? <span style={{ color: '#ff4d4f' }}>🔴</span> : <span style={{ color: '#fa8c16' }}>⚠️</span> },
-    { title: '', key: 'action', render: () => <Button size="small">Анализировать</Button> },
-  ];
-
-  const colors = ['#1890ff', '#52c41a', '#fa8c16', '#ff4d4f', '#722ed1'];
 
   return (
     <div>
+      {(fetchError || storeError) && (
+        <Alert
+          message="Ошибка загрузки"
+          description={fetchError || storeError}
+          type="error"
+          showIcon
+          closable
+          onClose={() => setFetchError(null)}
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <Card size="small" style={{ marginBottom: 16 }}>
-        <Row gutter={16}>
+        <Row gutter={16} align="middle">
           <Col>
-            <Select value={period} onChange={setPeriod} style={{ width: 120 }}>
+            <Select value={period} onChange={handlePeriodChange} style={{ width: 180 }}>
               <Select.Option value="week">Неделя</Select.Option>
               <Select.Option value="month">Месяц</Select.Option>
               <Select.Option value="quarter">Квартал</Select.Option>
+              <Select.Option value="year">Год</Select.Option>
+              <Select.Option value="custom">Произвольный период</Select.Option>
             </Select>
           </Col>
-          <Col>
-            <Select mode="multiple" value={selectedDealers} onChange={setSelectedDealers} style={{ width: 200 }} placeholder="Выбрать дилеров">
-              {funnelByDealer.map(d => <Select.Option key={d.dealerId} value={d.dealerId}>{d.dealerName}</Select.Option>)}
-            </Select>
-          </Col>
-          <Col>
-            <Segmented value={chartMode} onChange={setChartMode} options={[
-              { label: 'Абсолютные', value: 'absolute' },
-              { label: 'Конверсия этапа', value: 'conversion_step' },
-              { label: 'Конверсия от трафика', value: 'conversion_traffic' },
-            ]} />
-          </Col>
-          <Col>
-            <Select value={anomalyFilter} onChange={setAnomalyFilter} style={{ width: 150 }}>
-              <Select.Option value="all">Все типы</Select.Option>
-              <Select.Option value="conversion_drop">Конверсия</Select.Option>
-              <Select.Option value="traffic_drop">Трафик</Select.Option>
-              <Select.Option value="avg_check">Средний чек</Select.Option>
-            </Select>
-          </Col>
+          {period === 'custom' && (
+            <Col>
+              <RangePicker value={customDateRange as any} onChange={handleRangeChange} />
+            </Col>
+          )}
         </Row>
       </Card>
 
-      <Card size="small" title="Сравнение воронок дилеров" style={{ marginBottom: 16 }}>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" />
-            <YAxis />
-            <RechartsTooltip />
-            <Legend />
-            {funnelByDealer
-              .filter(d => selectedDealers.includes(d.dealerId))
-              .map((d, i) => (
-                <Line
-                  key={d.dealerId}
-                  type={d.dealerId === '3' ? 'dashed' : 'monotone'}
-                  dataKey={d.dealerName}
-                  stroke={colors[i % colors.length]}
-                  strokeWidth={d.dealerId === '3' ? 2 : 1}
-                  dot={d.dealerId === '3'}
-                />
-              ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </Card>
-
-      <Collapse style={{ marginBottom: 16 }}>
-        <Collapse.Panel header={`Светофор аномалий (${filteredAnomalies.length})`} key="anomalies">
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={12} sm={6}>
           <Card size="small">
-            <Table
-              dataSource={filteredAnomalies}
-              columns={anomalyColumns}
-              rowKey="id"
-              size="small"
-              loading={loading}
-              pagination={false}
+            <Statistic title="Всего лидов" value={totalLeads} prefix={<UserAddOutlined />} />
+          </Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small">
+            <Statistic
+              title="Продажи"
+              value={saleCount}
+              prefix={<RiseOutlined />}
+              valueStyle={{ color: '#52c41a' }}
             />
           </Card>
-        </Collapse.Panel>
-      </Collapse>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small">
+            <Statistic
+              title="Конверсия в продажу"
+              value={saleConv}
+              suffix="%"
+              valueStyle={{ color: Number(saleConv) >= 20 ? '#52c41a' : '#fa8c16' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small">
+            <Statistic
+              title="Потеряно на этапах"
+              value={lostCount}
+              valueStyle={{ color: lostCount > 0 ? '#ff4d4f' : '#52c41a' }}
+              prefix={<FallOutlined />}
+            />
+          </Card>
+        </Col>
+      </Row>
 
-      <Card size="small" title="Drill-down по дилеру">
-        <Row gutter={16}>
-          <Col span={24}>
-            <Select
-              value={selectedDealer}
-              onChange={setSelectedDealer}
-              style={{ width: 200 }}
-              placeholder="Выберите дилера"
-              allowClear
-            >
-              {funnelByDealer.map(d => <Select.Option key={d.dealerId} value={d.dealerId}>{d.dealerName}</Select.Option>)}
-            </Select>
-          </Col>
-        </Row>
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={24}>
+          <Collapse ghost items={[
+            {
+              key: 'lost',
+              label: <Text type="secondary">⚠ Потерянные лиды: {lostCount} — раскрыть детализацию</Text>,
+              children: lostLeads.length > 0 ? (
+                <Row gutter={[16, 16]}>
+                  {lostLeads.map((stage: any) => (
+                    <Col xs={24} sm={12} md={8} key={stage.stage}>
+                      <Card size="small" title={
+                        <Space>
+                          <WarningOutlined style={{ color: '#fa8c16' }} />
+                          <Text strong>{stage.label}</Text>
+                          <Tag color="orange">{stage.count}</Tag>
+                        </Space>
+                      }>
+                          <List
+                            size="small"
+                            dataSource={stage.leads}
+                            renderItem={(lead: any) => (
+                              <List.Item>
+                                <div style={{ width: '100%' }}>
+                                  <Text>{lead.full_name}</Text>
+                                  {lead.disqualify_reason && (
+                                    <div style={{ fontSize: 12, marginTop: 2 }}>
+                                      <Text type="danger" style={{ fontSize: 12 }}>✕ {lead.disqualify_reason}</Text>
+                                    </div>
+                                  )}
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                                    <Text type="secondary">{dayjs(lead.created_at).format('DD.MM.YYYY')}</Text>
+                                    <Text>{formatRub(lead.budget)}</Text>
+                                  </div>
+                                </div>
+                              </List.Item>
+                            )}
+                          />
+                      </Card>
+                    </Col>
+                  ))}
+                </Row>
+              ) : (
+                <Text type="secondary">Нет потерянных лидов</Text>
+              ),
+            },
+          ]} />
+        </Col>
+      </Row>
 
-        {selectedDealer && (
-          <>
-            <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={24}>
-                <Collapse>
-                  <Collapse.Panel header="Воронка по салонам" key="stores">
-                    <Table
-                      dataSource={storesFunnel}
-                      columns={storeColumns}
-                      rowKey="storeId"
-                      size="small"
-                      pagination={false}
-                    />
-                  </Collapse.Panel>
-                </Collapse>
-              </Col>
-            </Row>
-
-            <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={24}>
-                <Select
-                  value={selectedStore}
-                  onChange={setSelectedStore}
-                  style={{ width: 200 }}
-                  placeholder="Выберите салон для детализации по менеджерам"
-                  allowClear
-                >
-                  {storesFunnel.map(s => <Select.Option key={s.storeId} value={s.storeId}>{s.storeName}</Select.Option>)}
-                </Select>
-              </Col>
-            </Row>
-
-            {selectedStore && (
-              <Row gutter={16} style={{ marginTop: 16 }}>
-                <Col span={24}>
-                  <Card size="small">
-                    <Table
-                      dataSource={managersFunnel}
-                      columns={managerColumns}
-                      rowKey="managerId"
-                      size="small"
-                      pagination={false}
-                    />
-                  </Card>
-                </Col>
-              </Row>
-            )}
-          </>
+      <Card size="small" title="Воронка продаж" style={{ marginBottom: 16 }}>
+        {funnelChartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={funnelChartData} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis type="number" />
+              <YAxis type="category" dataKey="name" width={100} />
+              <Bar dataKey="count" radius={[4, 4, 0, 0]} isAnimationActive={false} activeBar={false}>
+                <LabelList dataKey="count" position="insideRight" style={{ fill: '#fff', fontWeight: 'bold', fontSize: 14 }} />
+                {funnelChartData.map((_ : any, i: number) => (
+                  <Cell key={i} fill={STAGE_COLORS[i % STAGE_COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <Empty description="Нет данных за выбранный период" />
         )}
+      </Card>
 
-        {!selectedDealer && (
-          <Empty description="Выберите дилера для детализации" style={{ marginTop: 24 }} />
-        )}
+      <Card size="small" title="Детализация по этапам">
+        <Table
+          dataSource={funnelChartData}
+          columns={stageColumns}
+          rowKey="name"
+          size="small"
+          loading={loading || funnelLoading}
+          pagination={false}
+        />
       </Card>
     </div>
   );

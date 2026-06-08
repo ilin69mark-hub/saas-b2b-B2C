@@ -37,7 +37,7 @@ func (m *MockLeadRepository) GetLeadByID(ctx context.Context, leadID, managerID 
 	return args.Get(0).(*models.Lead), args.Error(1)
 }
 
-func (m *MockLeadRepository) UpdateLeadStatus(ctx context.Context, leadID uuid.UUID, status string) error {
+func (m *MockLeadRepository) UpdateLeadStatus(ctx context.Context, leadID uuid.UUID, status string, disqualifyReason string) error {
 	args := m.Called(ctx, leadID, status)
 	return args.Error(0)
 }
@@ -182,7 +182,7 @@ func TestLeadService_UpdateStatus_Success(t *testing.T) {
 	leadID := uuid.New()
 
 	mockRepo.On("GetLeadByID", mock.Anything, leadID, managerID).Return(&models.Lead{ID: leadID}, nil)
-	mockRepo.On("UpdateLeadStatus", mock.Anything, leadID, "contact").Return(nil)
+	mockRepo.On("UpdateLeadStatus", mock.Anything, leadID, "contact", "").Return(nil)
 
 	err := service.UpdateStatus(context.Background(), managerID, leadID, "contact")
 
@@ -214,7 +214,7 @@ func TestLeadService_UpdateStatus_RepoError(t *testing.T) {
 	leadID := uuid.New()
 
 	mockRepo.On("GetLeadByID", mock.Anything, leadID, managerID).Return(&models.Lead{ID: leadID}, nil)
-	mockRepo.On("UpdateLeadStatus", mock.Anything, leadID, "contact").Return(errors.New("database error"))
+	mockRepo.On("UpdateLeadStatus", mock.Anything, leadID, "contact", "").Return(errors.New("database error"))
 
 	err := service.UpdateStatus(context.Background(), managerID, leadID, "contact")
 

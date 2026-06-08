@@ -3,6 +3,8 @@ import { Table, Button, Space, Modal, Form, Input, Select, message, Popconfirm }
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { EmployeeApi } from '@/api/employee';
 import { Employee } from '@/types';
+import PhoneInput from '@/components/common/PhoneInput';
+import { normalizeForApi } from '@/utils/phone';
 
 const { Option } = Select;
 
@@ -48,13 +50,14 @@ const EmployeesPage: React.FC = () => {
   const handleOk = async () => {
     try {
       const values = await form.validateFields();
+      const normalized = { ...values, phone: normalizeForApi(String(values.phone || '')) };
       if (editingEmployee) {
         // Обновление
-        await EmployeeApi.update(editingEmployee.id, values);
+        await EmployeeApi.update(editingEmployee.id, normalized);
         message.success('Сотрудник обновлен');
       } else {
         // Создание
-        await EmployeeApi.create(values);
+        await EmployeeApi.create(normalized);
         message.success('Сотрудник создан');
       }
       setIsModalVisible(false);
@@ -192,7 +195,7 @@ const EmployeesPage: React.FC = () => {
             name="phone"
             label="Телефон"
           >
-            <Input />
+            <PhoneInput />
           </Form.Item>
         </Form>
       </Modal>

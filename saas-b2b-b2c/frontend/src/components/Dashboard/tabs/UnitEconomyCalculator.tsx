@@ -33,22 +33,24 @@ export interface UnitTemplate {
 interface UnitEconomyCalculatorProps {
   templates?: UnitTemplate[];
   onSaveTemplate?: (template: UnitTemplate) => Promise<void>;
+  onDeleteTemplate?: (id: string) => Promise<void>;
 }
 
 const defaultInput: UnitEconomyInput = {
   salePrice: 0,
   purchasePrice: 0,
-  managerPercent: 5,
+  managerPercent: 0,
   deliveryCost: 0,
-  acquiringPercent: 2,
+  acquiringPercent: 0,
   rentAmortization: 0,
   additionalServices: 0,
 };
 
-const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates = [], onSaveTemplate }) => {
+const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates = [], onSaveTemplate, onDeleteTemplate }) => {
   const [input, setInput] = useState<UnitEconomyInput>(defaultInput);
   const [discount, setDiscount] = useState(0);
   const [templateName, setTemplateName] = useState('');
+  const [templateCategory, setTemplateCategory] = useState<string>('other');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
@@ -57,10 +59,7 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
     const managerBonus = priceAfterDiscount * (input.managerPercent / 100);
     const acquiringFee = priceAfterDiscount * (input.acquiringPercent / 100);
     
-    const totalCosts = input.purchasePrice + managerBonus + input.deliveryCost + 
-                     acquiringFee + input.rentAmortization + input.additionalServices;
-    
-    const marginalProfit = priceAfterDiscount - input.purchasePrice;
+    const marginalProfit = input.salePrice - input.purchasePrice;
     const netProfit = marginalProfit - input.deliveryCost - managerBonus - acquiringFee - input.rentAmortization - input.additionalServices;
     const profitability = priceAfterDiscount > 0 ? (netProfit / priceAfterDiscount) * 100 : 0;
 
@@ -101,11 +100,12 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
     try {
       await onSaveTemplate({
         name: templateName,
-        category: 'other',
+        category: templateCategory as UnitTemplate['category'],
         input,
       });
       message.success('Шаблон сохранён');
       setTemplateName('');
+      setTemplateCategory('other');
     } catch (error) {
       message.error('Ошибка сохранения шаблона');
     } finally {
@@ -135,12 +135,11 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
                 <Text type="secondary">Цена продажи (руб.)</Text>
                 <InputNumber
                   style={{ width: '100%', marginTop: 4 }}
-                  value={input.salePrice}
+                  value={input.salePrice || undefined}
                   onChange={v => handleInputChange('salePrice', v || 0)}
                   min={0}
-                  placeholder="0"
-                  formatter={value => `${value} ₽`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
-                  parser={value => value?.replace(/ ₽/g, '').replace(/ /g, '') as any}
+                  formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+                  parser={value => value?.replace(/[^\d.]/g, '') as any}
                 />
               </div>
 
@@ -148,12 +147,11 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
                 <Text type="secondary">Закупочная цена у фабрики (руб.)</Text>
                 <InputNumber
                   style={{ width: '100%', marginTop: 4 }}
-                  value={input.purchasePrice}
+                  value={input.purchasePrice || undefined}
                   onChange={v => handleInputChange('purchasePrice', v || 0)}
                   min={0}
-                  placeholder="0"
-                  formatter={value => `${value} ₽`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
-                  parser={value => value?.replace(/ ₽/g, '').replace(/ /g, '') as any}
+                  formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+                  parser={value => value?.replace(/[^\d.]/g, '') as any}
                 />
               </div>
 
@@ -162,22 +160,22 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
                   <Text type="secondary">Процент менеджеру (%)</Text>
                   <InputNumber
                     style={{ width: '100%', marginTop: 4 }}
-                    value={input.managerPercent}
+                    value={input.managerPercent || undefined}
                     onChange={v => handleInputChange('managerPercent', v || 0)}
                     min={0}
                     max={100}
-                    placeholder="5"
+                    parser={value => value?.replace(/[^\d.]/g, '') as any}
                   />
                 </Col>
                 <Col span={12}>
                   <Text type="secondary">Процент за эквайринг (%)</Text>
                   <InputNumber
                     style={{ width: '100%', marginTop: 4 }}
-                    value={input.acquiringPercent}
+                    value={input.acquiringPercent || undefined}
                     onChange={v => handleInputChange('acquiringPercent', v || 0)}
                     min={0}
                     max={100}
-                    placeholder="2"
+                    parser={value => value?.replace(/[^\d.]/g, '') as any}
                   />
                 </Col>
               </Row>
@@ -186,12 +184,11 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
                 <Text type="secondary">Стоимость доставки (руб.)</Text>
                 <InputNumber
                   style={{ width: '100%', marginTop: 4 }}
-                  value={input.deliveryCost}
+                  value={input.deliveryCost || undefined}
                   onChange={v => handleInputChange('deliveryCost', v || 0)}
                   min={0}
-                  placeholder="0"
-                  formatter={value => `${value} ₽`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
-                  parser={value => value?.replace(/ ₽/g, '').replace(/ /g, '') as any}
+                  formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+                  parser={value => value?.replace(/[^\d.]/g, '') as any}
                 />
               </div>
 
@@ -199,12 +196,11 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
                 <Text type="secondary">Амортизация аренды на единицу (руб.)</Text>
                 <InputNumber
                   style={{ width: '100%', marginTop: 4 }}
-                  value={input.rentAmortization}
+                  value={input.rentAmortization || undefined}
                   onChange={v => handleInputChange('rentAmortization', v || 0)}
                   min={0}
-                  placeholder="0"
-                  formatter={value => `${value} ₽`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
-                  parser={value => value?.replace(/ ₽/g, '').replace(/ /g, '') as any}
+                  formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+                  parser={value => value?.replace(/[^\d.]/g, '') as any}
                 />
               </div>
 
@@ -212,12 +208,11 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
                 <Text type="secondary">Дополнительные услуги (чехлы, пропитка, сборка) (руб.)</Text>
                 <InputNumber
                   style={{ width: '100%', marginTop: 4 }}
-                  value={input.additionalServices}
+                  value={input.additionalServices || undefined}
                   onChange={v => handleInputChange('additionalServices', v || 0)}
                   min={0}
-                  placeholder="0"
-                  formatter={value => `${value} ₽`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
-                  parser={value => value?.replace(/ ₽/g, '').replace(/ /g, '') as any}
+                  formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+                  parser={value => value?.replace(/[^\d.]/g, '') as any}
                 />
               </div>
             </Space>
@@ -229,7 +224,7 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
             <Space direction="vertical" style={{ width: '100%' }} size="middle">
               <div style={{ 
                 padding: 16, 
-                background: result.marginalProfit >= 0 ? '#f6ffed' : '#fff1f0',
+                background: 'transparent',
                 borderRadius: 8,
                 border: `1px solid ${result.marginalProfit >= 0 ? '#b7eb8f' : '#ffccc7'}`
               }}>
@@ -241,7 +236,7 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
 
               <div style={{ 
                 padding: 16, 
-                background: result.netProfit >= 0 ? '#e6f7ff' : '#fff1f0',
+                background: 'transparent',
                 borderRadius: 8,
                 border: `1px solid ${result.netProfit >= 0 ? '#91d5ff' : '#ffccc7'}`
               }}>
@@ -250,9 +245,9 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
                   {formatCurrency(result.netProfit)}
                 </Title>
                 {discount > 0 && (
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    (без скидки: {formatCurrency(result.netProfit + (input.salePrice * discount / 100 * (1 - input.managerPercent / 100 - input.acquiringPercent / 100) - input.deliveryCost - input.rentAmortization - input.additionalServices))})
-                  </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      (без скидки: {formatCurrency(result.netProfit + input.salePrice * discount / 100 * (1 - input.managerPercent / 100 - input.acquiringPercent / 100))})
+                    </Text>
                 )}
               </div>
 
@@ -300,19 +295,37 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
         <Col xs={24} md={12}>
           <Card type="inner" title="📂 Шаблоны" size="small">
             {templates.length > 0 ? (
-              <Select
-                style={{ width: '100%' }}
-                placeholder="Выберите шаблон"
-                value={selectedTemplateId || undefined}
-                onChange={handleLoadTemplate}
-                allowClear
-              >
+              <Space direction="vertical" style={{ width: '100%' }}>
                 {templates.map(template => (
-                  <Option key={template.id} value={template.id!}>
-                    <Tag>{template.category}</Tag> {template.name}
-                  </Option>
+                  <Row key={template.id} align="middle" gutter={8}>
+                    <Col flex="auto">
+                      <Button
+                        block
+                        type={selectedTemplateId === template.id ? 'primary' : 'default'}
+                        onClick={() => handleLoadTemplate(template.id!)}
+                        style={{ textAlign: 'left' }}
+                      >
+                        <Tag>{template.category}</Tag> {template.name}
+                      </Button>
+                    </Col>
+                    <Col>
+                      <Button
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        onClick={() => {
+                          if (onDeleteTemplate && template.id) {
+                            onDeleteTemplate(template.id);
+                            if (selectedTemplateId === template.id) {
+                              setSelectedTemplateId('');
+                            }
+                          }
+                        }}
+                      />
+                    </Col>
+                  </Row>
                 ))}
-              </Select>
+              </Space>
             ) : (
               <Text type="secondary">Нет сохранённых шаблонов</Text>
             )}
@@ -325,8 +338,14 @@ const UnitEconomyCalculator: React.FC<UnitEconomyCalculatorProps> = ({ templates
                 placeholder="Название (диван, кухня, шкаф)"
                 value={templateName}
                 onChange={e => setTemplateName(e.target.value)}
-                style={{ width: 200 }}
+                style={{ width: 160 }}
               />
+              <Select value={templateCategory} onChange={setTemplateCategory} style={{ width: 120 }}>
+                <Option value="sofa">Диван</Option>
+                <Option value="kitchen">Кухня</Option>
+                <Option value="wardrobe">Шкаф</Option>
+                <Option value="other">Другое</Option>
+              </Select>
               <Button 
                 type="primary" 
                 icon={<SaveOutlined />}

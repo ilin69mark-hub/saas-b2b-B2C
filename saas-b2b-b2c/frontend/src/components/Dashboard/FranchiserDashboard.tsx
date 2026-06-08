@@ -1,12 +1,8 @@
 import React, { useState, useEffect, Suspense, lazy, Component } from 'react';
-import { Layout, Row, Col, Card, Typography, Tabs, Badge, Avatar, Dropdown, Space, Spin, Statistic, message, Alert } from 'antd';
+import { Layout, Row, Col, Card, Typography, Tabs, Space, Spin, Statistic, message, Alert } from 'antd';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/store';
-import { 
-  UserOutlined, 
-  LogoutOutlined, 
-  SettingOutlined, 
-  BellOutlined,
+import {
   PercentageOutlined,
   RiseOutlined,
   TeamOutlined,
@@ -15,13 +11,16 @@ import {
   FileTextOutlined,
   DashboardOutlined,
   HeartOutlined,
+  SunOutlined,
+  MoonOutlined,
 } from '@ant-design/icons';
 import { useRouter } from 'next/router';
-import { useDispatch } from 'react-redux';
-import { logout } from '@/store/authSlice';
 import dayjs from 'dayjs';
 import 'dayjs/locale/ru';
 import { useFranchiserStore, FranchiserSummary } from '@/store/franchiserStore';
+import { useThemeMode } from '@/components/ThemeProvider';
+import NotificationBell from './NotificationBell';
+import UserMenu from './UserMenu';
 
 dayjs.locale('ru');
 
@@ -71,17 +70,15 @@ interface FranchiserDashboardProps {
 }
 
 const FranchiserDashboard: React.FC<FranchiserDashboardProps> = ({ user, title }) => {
-const router = useRouter();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState('network');
-  
+
   const {
     summary,
     isLoading,
-    alertCount,
     fetchSummary,
   } = useFranchiserStore();
 
-  const dispatch = useDispatch();
   const isAuthenticated = useSelector((state: RootState) => state.auth.isAuthenticated);
 
   useEffect(() => {
@@ -91,48 +88,13 @@ const router = useRouter();
     return () => clearInterval(interval);
   }, [fetchSummary, isAuthenticated]);
 
-  const handleLogout = () => {
-    // Очистить Redux‑state и локальное хранилище
-    dispatch(logout());
-    // Удаляем токен из localStorage (на всякий случай, уже делается в logout)
-    localStorage.removeItem('accessToken');
-    // Убираем заголовок Authorization из глобального axios‑клиента
-    import('@/api/axiosClient').then(mod => {
-      if (mod && mod.default && mod.default.defaults) {
-        delete mod.default.defaults.headers.common['Authorization'];
-      }
-    });
-    // Перенаправляем на страницу входа
-    router.replace('/login');
-  };
+  const { theme: themeName, toggleTheme } = useThemeMode();
+  const isDark = themeName === 'dark';
+  const headerStyle = isDark
+    ? { background: '#1f1f1f', borderBottom: '1px solid #303030' }
+    : { background: '#fff', borderBottom: '1px solid #f0f0f0' };
 
   const currentDate = dayjs().format('dddd, D MMMM YYYY');
-
-  const userMenuItems = [
-    {
-      key: 'profile',
-      icon: <UserOutlined />,
-      label: 'Профиль',
-      onClick: () => router.push('/profile'),
-    },
-    {
-      key: 'settings',
-      icon: <SettingOutlined />,
-      label: 'Настройки',
-      onClick: () => router.push('/settings'),
-    },
-    {
-      key: 'divider',
-      type: 'divider' as const,
-    },
-    {
-      key: 'logout',
-      icon: <LogoutOutlined />,
-      label: 'Выход',
-      danger: true,
-      onClick: handleLogout,
-    },
-  ];
 
   const tabsItems = [
     {
@@ -185,14 +147,14 @@ const router = useRouter();
   };
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#f0f2f5' }}>
+    <Layout style={{ minHeight: '100vh', background: isDark ? '#141414' : '#f0f2f5' }}>
       <AntHeader style={{ 
-        background: '#fff', 
+        ...headerStyle,
         padding: '0 24px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+        boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.4)' : '0 2px 8px rgba(0,0,0,0.06)',
         position: 'sticky',
         top: 0,
         zIndex: 100,
@@ -257,16 +219,16 @@ const router = useRouter();
             </Col>
           </Row>
 
-          <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-            <Badge count={alertCount} size="small">
-              <Badge dot={alertCount > 0} color="red">
-                <Avatar 
-                  icon={<UserOutlined />} 
-                  style={{ backgroundColor: '#1890ff', cursor: 'pointer' }}
-                />
-              </Badge>
-            </Badge>
-          </Dropdown>
+          <NotificationBell />
+          <span
+            onClick={toggleTheme}
+            role="button"
+            aria-label="Переключить тему"
+            style={{ cursor: 'pointer', fontSize: 18, color: isDark ? '#fff' : undefined }}
+          >
+            {isDark ? <SunOutlined /> : <MoonOutlined />}
+          </span>
+          <UserMenu user={user as any} />
         </Space>
       </AntHeader>
 

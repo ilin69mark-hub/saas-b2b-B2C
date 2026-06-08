@@ -1,61 +1,42 @@
-// src/components/Dashboard/tabs/TerritoryCommunicationsTab.tsx
-import React, { useState, useMemo } from 'react';
-import { Card, Row, Col, Typography, Table, Tag, Space, Input, Button, Select, Modal, Form, DatePicker, Badge, Tabs, Segmented, TextArea, Upload, message, Timeline, Popconfirm } from 'antd';
-import { MessageOutlined, TeamOutlined, CheckCircleOutlined, ClockCircleOutlined, UserOutlined, PlusOutlined, SearchOutlined, FilterOutlined, SendOutlined, PhoneOutlined, MailOutlined, FileTextOutlined, DollarOutlined, WarningOutlined, ExclamationCircleOutlined, TagOutlined, CalendarOutlined, UploadOutlined } from '@ant-design/icons';
-import { useTerritoryManagerStore } from '@/store/territoryManagerStore';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Card, Row, Col, Typography, Table, Tag, Space, Input, Button, Select, Modal, Form, DatePicker, Segmented, Timeline, Collapse, message } from 'antd';
+import { TeamOutlined, PlusOutlined, SendOutlined, PhoneOutlined, MailOutlined, FileTextOutlined, DollarOutlined, UnorderedListOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import apiClient from '@/api/axiosClient';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
-
-interface Request {
-  id: string;
-  type: 'discount' | 'return' | 'marketing' | 'assortment' | 'document' | 'other';
-  dealerName: string;
-  description: string;
-  amount?: number;
-  createdAt: string;
-  slaHours: number;
-  status: 'new' | 'in_progress' | 'resolved' | 'escalated';
-}
+const { TextArea } = Input;
+const { RangePicker } = DatePicker;
 
 interface Task {
   id: string;
   title: string;
-  dealerName: string;
+  assignedTo: string;
   assignedAt: string;
   dueDate: string;
-  status: 'sent' | 'accepted' | 'in_progress' | 'done' | 'overdue';
-  priority: 'high' | 'medium' | 'low';
+  dueDateSort: string;
+  status: string;
 }
 
 interface Interaction {
   id: string;
-  date: string;
-  type: 'call' | 'meeting' | 'email' | 'task' | 'discount';
+  dealer_id: string;
+  type: string;
   description: string;
-  result?: string;
-  files?: string[];
+  result: string;
+  date: string;
 }
 
 interface TerritoryCommunicationsTabProps {
   loading?: boolean;
 }
 
-const REQUEST_TYPES = [
-  { value: 'discount', label: 'Согласование скидки', icon: <DollarOutlined /> },
-  { value: 'return', label: 'Возврат / брак', icon: <WarningOutlined /> },
-  { value: 'marketing', label: 'Маркетинговая поддержка', icon: <MessageOutlined /> },
-  { value: 'assortment', label: 'Вопрос по ассортименту', icon: <TagOutlined /> },
-  { value: 'document', label: 'Документооборот', icon: <FileTextOutlined /> },
-  { value: 'other', label: 'Другое', icon: <MessageOutlined /> },
-];
-
-const TASK_TEMPLATES = [
-  { value: 'display', label: 'Оформить витрину по новому планшету' },
-  { value: 'pricelist', label: 'Обновить ценники на коллекцию' },
-  { value: 'training', label: 'Провести обучение продавцов' },
-  { value: 'report', label: 'Предоставить отчёт по остаткам' },
-  { value: 'custom', label: 'Своя задача' },
+const PERIOD_OPTIONS = [
+  { label: 'Неделя', value: 'week' },
+  { label: 'Месяц', value: 'month' },
+  { label: 'Квартал', value: 'quarter' },
+  { label: 'Год', value: 'year' },
+  { label: 'Свой', value: 'custom' },
 ];
 
 const INTERACTION_TYPES = [
@@ -66,124 +47,326 @@ const INTERACTION_TYPES = [
   { value: 'discount', label: 'Согласование', icon: <DollarOutlined /> },
 ];
 
+const INTERACTION_ICONS: Record<string, React.ReactNode> = {
+  call: <PhoneOutlined />,
+  meeting: <TeamOutlined />,
+  email: <MailOutlined />,
+  task: <FileTextOutlined />,
+  discount: <DollarOutlined />,
+};
+
+const INTERACTION_COLORS: Record<string, string> = {
+  call: 'blue',
+  meeting: 'green',
+  email: 'orange',
+  task: 'purple',
+  discount: 'red',
+};
+
 const TerritoryCommunicationsTab: React.FC<TerritoryCommunicationsTabProps> = ({ loading }) => {
-  const [activeBlock, setActiveBlock] = useState<'requests' | 'tasks' | 'history'>('requests');
-  const [requestFilter, setRequestFilter] = useState<string>('all');
-  const [requestTypeFilter, setRequestTypeFilter] = useState<string>('all');
+  const [activeBlock, setActiveBlock] = useState<'tasks' | 'history'>('tasks');
   const [taskFilter, setTaskFilter] = useState<string>('all');
-  const [selectedDealerHistory, setSelectedDealerHistory] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [interactions, setInteractions] = useState<Interaction[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [commLoading, setCommLoading] = useState(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [interactionModalOpen, setInteractionModalOpen] = useState(false);
-  const [newRequestCount, setNewRequestCount] = useState(3);
+  const [dealers, setDealers] = useState<{ id: string; name: string }[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [savingInteraction, setSavingInteraction] = useState(false);
+  const [period, setPeriod] = useState<string>('month');
+  const [customRange, setCustomRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null);
+  const [viewMode, setViewMode] = useState<'timeline' | 'list'>('timeline');
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [dealerFilter, setDealerFilter] = useState<string>('');
 
-  const requests = useMemo((): Request[] => [
-    { id: '1', type: 'discount', dealerName: 'Мебель Москва', description: 'Согласовать скидку 15% на диван Бостон', amount: 120000, createdAt: '2026-04-28T10:00:00', slaHours: 26, status: 'new' },
-    { id: '2', type: 'return', dealerName: 'Диванит Воронеж', description: 'Возврат бракованного кресла', amount: 25000, createdAt: '2026-04-28T09:00:00', slaHours: 2, status: 'new' },
-    { id: '3', type: 'marketing', dealerName: 'МебельЛига', description: 'Запрос баннеров к юбилею', amount: 0, createdAt: '2026-04-27T14:00:00', slaHours: 48, status: 'in_progress' },
-    { id: '4', type: 'assortment', dealerName: 'Евромебель', description: 'Новая коллекция когда?', amount: 0, createdAt: '2026-04-26T11:00:00', slaHours: -5, status: 'escalated' },
-    { id: '5', type: 'document', dealerName: 'Салон мебели Казань', description: 'Договор на поставку', amount: 500000, createdAt: '2026-04-28T08:00:00', slaHours: 30, status: 'resolved' },
-  ], []);
+  const toggleExpand = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
-  const tasks = useMemo((): Task[] => [
-    { id: '1', title: 'Оформить витрину по новой коллекции', dealerName: 'Мебель Москва', assignedAt: '2026-04-25', dueDate: '2026-04-30', status: 'in_progress', priority: 'high' },
-    { id: '2', title: 'Обновить ценники', dealerName: 'Диванит Воронеж', assignedAt: '2026-04-26', dueDate: '2026-05-01', status: 'accepted', priority: 'medium' },
-    { id: '3', title: 'Отчёт по остаткам', dealerName: 'МебельЛига', assignedAt: '2026-04-27', dueDate: '2026-04-28', status: 'done', priority: 'low' },
-    { id: '4', title: 'Провести обучение', dealerName: 'Евромебель', assignedAt: '2026-04-20', dueDate: '2026-04-25', status: 'overdue', priority: 'high' },
-  ], []);
+  const loadCommData = useCallback(async (p: string, custom?: [dayjs.Dayjs | null, dayjs.Dayjs | null] | null) => {
+    setCommLoading(true);
+    try {
+      let url = `/territory/communications?period=${p}`;
+      if (p === 'custom' && custom?.[0] && custom?.[1]) {
+        url += `&start_date=${custom[0].format('YYYY-MM-DD')}&end_date=${custom[1].format('YYYY-MM-DD')}`;
+      }
+      const [commRes, planRes] = await Promise.all([
+        apiClient.get(url),
+        apiClient.get('/territory/planfact?period=month').catch(() => null),
+      ]);
+      const data = commRes.data;
+      const dealerMap: Record<string, string> = {};
+      if (planRes?.data?.dealers) {
+        planRes.data.dealers.forEach((d: any) => {
+          dealerMap[d.id] = d.dealer_name;
+        });
+        setDealers(planRes.data.dealers.map((d: any) => ({ id: d.id, name: d.dealer_name })));
+      }
 
-  const interactions = useMemo((): Interaction[] => [
-    { id: '1', date: '2026-04-28T10:00:00', type: 'call', description: 'Звонок по скидке', result: 'Согласовано 10%' },
-    { id: '2', date: '2026-04-27T15:00:00', type: 'meeting', description: 'Встреча в салоне', result: 'Договорились о партнёрстве' },
-    { id: '3', date: '2026-04-26T09:00:00', type: 'email', description: 'Отправил коммерческое предложение', result: 'Ожидает ответа' },
-    { id: '4', date: '2026-04-25T11:00:00', type: 'task', description: 'Поставил задачу на витрину', result: 'В работе' },
-  ], []);
+      const mapped: Task[] = (data.tasks || []).map((t: any) => ({
+        id: t.id,
+        title: t.title,
+        assignedTo: dealerMap[t.assigned_to] || t.assigned_to || 'Неизвестно',
+        assignedAt: t.created_at ? dayjs(t.created_at).format('DD.MM.YYYY') : '-',
+        dueDate: t.due_date ? dayjs(t.due_date).format('DD.MM.YYYY') : '-',
+        dueDateSort: t.due_date || '',
+        status: t.status || 'pending',
+      }));
+      setTasks(mapped);
+      setInteractions(data.interactions || []);
+      setUnreadCount(data.unread_messages || 0);
+    } catch (e) {
+      console.error('Error fetching communications:', e);
+    }
+    setCommLoading(false);
+  }, []);
 
-  const dealers = ['Мебель Москва', 'Диванит Воронеж', 'МебельЛига', 'Салон мебели Казань', 'Евромебель'];
-
-  const filteredRequests = useMemo(() => {
-    return requests.filter(r => {
-      if (requestFilter === 'overdue' && r.slaHours >= 0) return false;
-      if (requestFilter === 'new' && r.status !== 'new') return false;
-      if (requestFilter === 'escalated' && r.status !== 'escalated') return false;
-      if (requestTypeFilter !== 'all' && r.type !== requestTypeFilter) return false;
-      return true;
-    }).sort((a, b) => a.slaHours - b.slaHours);
-  }, [requests, requestFilter, requestTypeFilter]);
+  useEffect(() => { loadCommData(period, customRange); }, [period, customRange]);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
       if (taskFilter === 'all') return true;
-      if (taskFilter === 'overdue' && t.status !== 'overdue') return false;
-      if (taskFilter === 'active' && (t.status === 'done' || t.status === 'overdue')) return false;
+      if (taskFilter === 'overdue') return t.status === 'overdue';
+      if (taskFilter === 'active') return t.status !== 'done' && t.status !== 'overdue';
       return true;
     });
   }, [tasks, taskFilter]);
 
-  const getSlaColor = (hours: number) => {
-    if (hours < 0) return '#ff4d4f';
-    if (hours < 2) return '#ff4d4f';
-    if (hours < 24) return '#fa8c16';
-    return '#52c41a';
+  const statusColors: Record<string, string> = {
+    pending: 'default', in_progress: 'processing', done: 'green', overdue: 'red',
+  };
+  const statusLabels: Record<string, string> = {
+    pending: 'Ожидает', in_progress: 'В работе', done: 'Готово', overdue: 'Просрочено',
   };
 
-  const getSlaLabel = (hours: number) => {
-    if (hours < 0) return `${Math.abs(hours)}ч просрочено`;
-    if (hours < 24) return `${hours}ч`;
-    return `${Math.round(hours / 24)}дн`;
-  };
+  const dealerFilters = useMemo(() => {
+    const unique = [...new Set(tasks.map(t => t.assignedTo))];
+    return unique.map(d => ({ text: d, value: d }));
+  }, [tasks]);
 
-  const requestColumns = [
-    { title: 'Тип', dataIndex: 'type', key: 'type', render: (t: string) => {
-      const type = REQUEST_TYPES.find(x => x.value === t);
-      return <Space>{type?.icon} {type?.label}</Space>;
-    }},
-    { title: 'Дилер', dataIndex: 'dealerName', key: 'dealerName' },
-    { title: 'Суть', dataIndex: 'description', key: 'description' },
-    { title: 'Сумма', dataIndex: 'amount', key: 'amount', render: (v: number) => v > 0 ? `${(v / 1000).toFixed(0)}k ₽` : '-' },
-    { title: 'Дата', dataIndex: 'createdAt', key: 'createdAt', render: (d: string) => dayjs(d).format('DD.MM HH:mm') },
-    { title: 'SLA', key: 'sla', render: (_: any, r: Request) => (
-      <Tag color={getSlaColor(r.slaHours)}>{getSlaLabel(r.slaHours)}</Tag>
-    )},
-    { title: 'Статус', dataIndex: 'status', key: 'status', render: (s: string) => {
-      const colors: Record<string, string> = { new: 'red', in_progress: 'blue', resolved: 'green', escalated: 'orange' };
-      const labels: Record<string, string> = { new: 'Новый', in_progress: 'В работе', resolved: 'Решён', escalated: 'Эскалирован' };
-      return <Tag color={colors[s]}>{labels[s]}</Tag>;
-    }},
-    { title: '', key: 'actions', render: (_: any, r: Request) => (
-      <Space>
-        {r.status === 'new' && <Button size="small" onClick={() => message.success('Взять в работу')}>Взять</Button>}
-        <Button size="small">Ответить</Button>
-        {r.status !== 'escalated' && <Button size="small" danger>Эскалировать</Button>}
-      </Space>
-    )},
+  const statusFilters = [
+    { text: 'Ожидает', value: 'pending' },
+    { text: 'В работе', value: 'in_progress' },
+    { text: 'Готово', value: 'done' },
+    { text: 'Просрочено', value: 'overdue' },
   ];
 
   const taskColumns = [
-    { title: 'Задача', dataIndex: 'title', key: 'title' },
-    { title: 'Дилер', dataIndex: 'dealerName', key: 'dealerName' },
-    { title: 'Назначена', dataIndex: 'assignedAt', key: 'assignedAt' },
-    { title: 'Срок', dataIndex: 'dueDate', key: 'dueDate' },
-    { title: 'Статус', dataIndex: 'status', key: 'status', render: (s: string) => {
-      const colors: Record<string, string> = { sent: 'default', accepted: 'blue', in_progress: 'processing', done: 'green', overdue: 'red' };
-      const labels: Record<string, string> = { sent: 'Отправлено', accepted: 'Принято', in_progress: 'В работе', done: 'Готово', overdue: 'Просрочено' };
-      return <Tag color={colors[s]}>{labels[s]}</Tag>;
-    }},
-    { title: 'Приоритет', dataIndex: 'priority', key: 'priority', render: (p: string) => {
-      const colors: Record<string, string> = { high: 'red', medium: 'orange', low: 'default' };
-      return <Tag color={colors[p]}>{p === 'high' ? 'Высокий' : p === 'medium' ? 'Средний' : 'Низкий'}</Tag>;
-    }},
+    { title: 'Задача', dataIndex: 'title', key: 'title', align: 'center' as const,
+      filters: [...new Set(tasks.map(t => t.title))].map(t => ({ text: t, value: t })),
+      onFilter: (value: any, record: Task) => record.title === value,
+      filterSearch: true,
+    },
+    { title: 'Дилер', dataIndex: 'assignedTo', key: 'assignedTo', align: 'center' as const,
+      filters: dealerFilters,
+      onFilter: (value: any, record: Task) => record.assignedTo === value,
+    },
+    { title: 'Назначена', dataIndex: 'assignedAt', key: 'assignedAt', align: 'center' as const,
+      sorter: (a: Task, b: Task) => dayjs(a.assignedAt, 'DD.MM.YYYY').unix() - dayjs(b.assignedAt, 'DD.MM.YYYY').unix(),
+    },
+    { title: 'Срок', dataIndex: 'dueDate', key: 'dueDate', align: 'center' as const,
+      sorter: (a: Task, b: Task) => {
+        if (!a.dueDateSort && !b.dueDateSort) return 0;
+        if (!a.dueDateSort) return 1;
+        if (!b.dueDateSort) return -1;
+        return a.dueDateSort.localeCompare(b.dueDateSort);
+      },
+    },
+    { title: 'Статус', dataIndex: 'status', key: 'status', align: 'center' as const,
+      filters: statusFilters,
+      onFilter: (value: any, record: Task) => record.status === value,
+      render: (s: string) => (
+        <Tag color={statusColors[s] || 'default'}>{statusLabels[s] || s}</Tag>
+      ),
+    },
   ];
 
   const [taskForm] = Form.useForm();
+  const [interactionForm] = Form.useForm();
 
   const handleCreateTask = async () => {
     try {
       const values = await taskForm.validateFields();
+      setCreating(true);
+      const dealerId = Array.isArray(values.dealer) ? values.dealer[0] : values.dealer;
+      await apiClient.post('/territory/tasks', {
+        dealer_id: dealerId,
+        title: values.description,
+        description: values.description,
+        due_date: values.dueDate ? dayjs(values.dueDate).format('YYYY-MM-DD') : '',
+      });
       message.success('Задача создана');
       setTaskModalOpen(false);
       taskForm.resetFields();
-    } catch (e) {}
+      loadCommData(period, customRange);
+    } catch (e: any) {
+      if (e?.errorFields) return;
+      message.error('Ошибка создания задачи');
+    } finally {
+      setCreating(false);
+    }
   };
+
+  const handleCreateInteraction = async (values: any) => {
+    setSavingInteraction(true);
+    try {
+      const dealerId = Array.isArray(values.dealer) ? values.dealer[0] : values.dealer;
+      const dateStr = values.date ? dayjs(values.date).format('YYYY-MM-DD HH:mm') : '';
+      await apiClient.post('/territory/interactions', {
+        dealer_id: dealerId,
+        type: values.type,
+        date: dateStr,
+        description: values.description || '',
+        result: values.result || '',
+      });
+      message.success('Контакт сохранён');
+      setInteractionModalOpen(false);
+      interactionForm.resetFields();
+      loadCommData(period, customRange);
+    } catch (e: any) {
+      message.error('Ошибка сохранения контакта');
+    } finally {
+      setSavingInteraction(false);
+    }
+  };
+
+  const dealerNameMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    dealers.forEach(d => { m[d.id] = d.name; });
+    return m;
+  }, [dealers]);
+
+  const mergedItems = useMemo(() => {
+    const items: { id: string; sortKey: string; isTask: boolean; task?: Task; interaction?: Interaction }[] = [];
+
+    interactions.forEach((ix) => {
+      if (dealerFilter && ix.dealer_id !== dealerFilter) return;
+      items.push({ id: `ix-${ix.id}`, sortKey: ix.date || '', isTask: false, interaction: ix });
+    });
+
+    tasks.forEach((t) => {
+      if (dealerFilter && t.assignedTo !== dealerNameMap[dealerFilter] && t.assignedTo !== dealerFilter) return;
+      items.push({ id: `task-${t.id}`, sortKey: t.dueDateSort || t.assignedAt, isTask: true, task: t });
+    });
+
+    items.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+    return items;
+  }, [interactions, tasks, dealerFilter, dealerNameMap]);
+
+  const timelineItems = useMemo(() => {
+    return mergedItems.map((item) => {
+      const isExpanded = expandedIds.has(item.id);
+      let color = 'blue';
+      let summary: React.ReactNode = null;
+      let details: React.ReactNode = null;
+
+      if (item.isTask && item.task) {
+        const t = item.task;
+        color = t.status === 'done' ? 'green' : t.status === 'overdue' ? 'red' : 'blue';
+        summary = (
+          <Space>
+            <FileTextOutlined />
+            <Text strong>{t.title}</Text>
+            <Tag color={statusColors[t.status] || 'default'} style={{ margin: 0 }}>{statusLabels[t.status] || t.status}</Tag>
+          </Space>
+        );
+        details = (
+          <div style={{ padding: '8px 0 0 24px' }}>
+            {t.dueDate !== '-' && <Text type="secondary" style={{ display: 'block' }}>Срок: {t.dueDate}</Text>}
+            <Text type="secondary">Дилер: {t.assignedTo}</Text>
+          </div>
+        );
+      } else if (item.interaction) {
+        const ix = item.interaction;
+        color = INTERACTION_COLORS[ix.type] || 'blue';
+        summary = (
+          <Space>
+            {INTERACTION_ICONS[ix.type] || <FileTextOutlined />}
+            <Text strong>{INTERACTION_TYPES.find(t => t.value === ix.type)?.label || ix.type}</Text>
+          </Space>
+        );
+        details = (
+          <div style={{ padding: '8px 0 0 24px' }}>
+            {ix.description && <Text style={{ display: 'block' }}>{ix.description}</Text>}
+            {ix.result && <Text type="secondary" style={{ display: 'block' }}>Результат: {ix.result}</Text>}
+            <Text type="secondary">Дилер: {dealerNameMap[ix.dealer_id] || ix.dealer_id}</Text>
+          </div>
+        );
+      }
+
+      return {
+        color,
+        children: (
+          <div
+            onClick={() => toggleExpand(item.id)}
+            style={{ cursor: 'pointer' }}
+          >
+            <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+              {item.isTask && item.task
+                ? `${item.task.assignedAt}${item.task.dueDate !== '-' ? ` — срок ${item.task.dueDate}` : ''}`
+                : item.interaction?.date
+                  ? dayjs(item.interaction.date).format('DD.MM.YYYY HH:mm')
+                  : '-'}
+            </Text>
+            {summary}
+            {isExpanded && details}
+          </div>
+        ),
+      };
+    });
+  }, [mergedItems, expandedIds, dealerNameMap]);
+
+  const collapseItems = useMemo(() => {
+    return mergedItems.map((item) => {
+      const id = item.id;
+      let header: React.ReactNode = null;
+      let children: React.ReactNode = null;
+
+      if (item.isTask && item.task) {
+        const t = item.task;
+        header = (
+          <Space>
+            <FileTextOutlined />
+            <Text strong>{t.title}</Text>
+            <Tag color={statusColors[t.status] || 'default'} style={{ margin: 0 }}>{statusLabels[t.status] || t.status}</Tag>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t.assignedAt}</Text>
+          </Space>
+        );
+        children = (
+          <div>
+            <Text type="secondary" style={{ display: 'block' }}>Дилер: {t.assignedTo}</Text>
+            {t.dueDate !== '-' && <Text type="secondary" style={{ display: 'block' }}>Срок: {t.dueDate}</Text>}
+          </div>
+        );
+      } else if (item.interaction) {
+        const ix = item.interaction;
+        header = (
+          <Space>
+            {INTERACTION_ICONS[ix.type] || <FileTextOutlined />}
+            <Text strong>{INTERACTION_TYPES.find(t => t.value === ix.type)?.label || ix.type}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {ix.date ? dayjs(ix.date).format('DD.MM.YYYY HH:mm') : '-'}
+            </Text>
+          </Space>
+        );
+        children = (
+          <div>
+            {ix.description && <Text style={{ display: 'block' }}>{ix.description}</Text>}
+            {ix.result && <Text type="secondary" style={{ display: 'block' }}>Результат: {ix.result}</Text>}
+            <Text type="secondary">Дилер: {dealerNameMap[ix.dealer_id] || ix.dealer_id}</Text>
+          </div>
+        );
+      }
+
+      return { key: id, label: header, children };
+    });
+  }, [mergedItems, dealerNameMap]);
 
   return (
     <div>
@@ -191,42 +374,12 @@ const TerritoryCommunicationsTab: React.FC<TerritoryCommunicationsTabProps> = ({
         <Row gutter={16}>
           <Col>
             <Segmented value={activeBlock} onChange={(v) => setActiveBlock(v as any)} options={[
-              { label: <Badge offset={[5, 0]}><span>Входящие запросы</span></Badge>, value: 'requests' },
-              { label: 'Мои задачи', value: 'tasks' },
+              { label: <span>Мои задачи{unreadCount > 0 ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, borderRadius: 9, backgroundColor: '#ff4d4f', color: '#fff', fontSize: 11, fontWeight: 600, padding: '0 5px', marginLeft: 5, lineHeight: '18px' }}>{unreadCount}</span> : ''}</span>, value: 'tasks' },
               { label: 'История', value: 'history' },
             ]} />
           </Col>
-          <Col>
-            <Select value={requestFilter} onChange={setRequestFilter} style={{ width: 140 }}>
-              <Select.Option value="all">Все</Select.Option>
-              <Select.Option value="new">Новые</Select.Option>
-              <Select.Option value="overdue">Просроченные</Select.Option>
-              <Select.Option value="escalated">Эскалированные</Select.Option>
-            </Select>
-          </Col>
-          <Col>
-            <Select value={requestTypeFilter} onChange={setRequestTypeFilter} style={{ width: 160 }}>
-              <Select.Option value="all">Все типы</Select.Option>
-              {REQUEST_TYPES.map(t => <Select.Option key={t.value} value={t.value}>{t.label}</Select.Option>)}
-            </Select>
-          </Col>
         </Row>
       </Card>
-
-      {activeBlock === 'requests' && (
-        <>
-          <Card size="small" title="Входящие запросы от дилеров">
-            <Table
-              dataSource={filteredRequests}
-              columns={requestColumns}
-              rowKey="id"
-              size="small"
-              loading={loading}
-              pagination={{ pageSize: 10 }}
-            />
-          </Card>
-        </>
-      )}
 
       {activeBlock === 'tasks' && (
         <>
@@ -248,8 +401,9 @@ const TerritoryCommunicationsTab: React.FC<TerritoryCommunicationsTabProps> = ({
               columns={taskColumns}
               rowKey="id"
               size="small"
-              loading={loading}
+              loading={loading || commLoading}
               pagination={{ pageSize: 10 }}
+              locale={{ emptyText: 'Нет задач' }}
             />
           </Card>
         </>
@@ -258,37 +412,58 @@ const TerritoryCommunicationsTab: React.FC<TerritoryCommunicationsTabProps> = ({
       {activeBlock === 'history' && (
         <>
           <Card size="small" style={{ marginBottom: 16 }}>
-            <Space>
+            <Space wrap>
+              <Segmented
+                value={period}
+                onChange={(v) => {
+                  setPeriod(v as string);
+                  if (v !== 'custom') setCustomRange(null);
+                }}
+                options={PERIOD_OPTIONS}
+              />
+              {period === 'custom' && (
+                <RangePicker
+                  value={customRange as any}
+                  onChange={(dates) => {
+                    setCustomRange(dates as any);
+                  }}
+                />
+              )}
               <Select
-                value={selectedDealerHistory}
-                onChange={setSelectedDealerHistory}
-                style={{ width: 200 }}
-                placeholder="Выберите дилера"
                 allowClear
+                placeholder="Все дилеры"
+                style={{ minWidth: 140 }}
+                value={dealerFilter || undefined}
+                onChange={(v) => setDealerFilter(v || '')}
               >
-                {dealers.map(d => <Select.Option key={d} value={d}>{d}</Select.Option>)}
+                {dealers.map(d => (
+                  <Select.Option key={d.id} value={d.id}>{d.name}</Select.Option>
+                ))}
               </Select>
               <Button icon={<PlusOutlined />} onClick={() => setInteractionModalOpen(true)}>
                 Добавить контакт
               </Button>
+              <Segmented
+                value={viewMode}
+                onChange={(v) => setViewMode(v as any)}
+                options={[
+                  { label: <span><ClockCircleOutlined /> Таймлайн</span>, value: 'timeline' },
+                  { label: <span><UnorderedListOutlined /> Список</span>, value: 'list' },
+                ]}
+              />
             </Space>
           </Card>
-          <Card size="small" title={`История взаимодействий${selectedDealerHistory ? ` - ${selectedDealerHistory}` : ''}`}>
-            <Timeline
-              items={interactions.map(i => {
-                const type = INTERACTION_TYPES.find(t => t.value === i.type);
-                return {
-                  color: type?.value === 'call' ? 'blue' : type?.value === 'meeting' ? 'green' : 'gray',
-                  children: (
-                    <Space direction="vertical" size={0}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>{dayjs(i.date).format('DD.MM.YYYY HH:mm')}</Text>
-                      <Space>{type?.icon} {i.description}</Space>
-                      {i.result && <Text type="secondary">{i.result}</Text>}
-                    </Space>
-                  ),
-                };
-              })}
-            />
+          <Card size="small" title="История взаимодействий">
+            {viewMode === 'timeline' ? (
+              <Timeline items={timelineItems} />
+            ) : (
+              <Collapse
+                ghost
+                items={collapseItems}
+                onChange={(keys) => setExpandedIds(new Set(keys as string[]))}
+                activeKey={Array.from(expandedIds)}
+              />
+            )}
           </Card>
         </>
       )}
@@ -298,35 +473,21 @@ const TerritoryCommunicationsTab: React.FC<TerritoryCommunicationsTabProps> = ({
         open={taskModalOpen}
         onCancel={() => setTaskModalOpen(false)}
         onOk={handleCreateTask}
+        confirmLoading={creating}
       >
         <Form form={taskForm} layout="vertical">
-          <Form.Item name="dealer" label="Дилер" rules={[{ required: true }]}>
-            <Select mode="multiple" placeholder="Выберите дилера">
-              {dealers.map(d => <Select.Option key={d} value={d}>{d}</Select.Option>)}
+          <Form.Item name="dealer" label="Дилер" rules={[{ required: true, message: 'Выберите дилера' }]}>
+            <Select placeholder="Выберите дилера" showSearch optionFilterProp="label">
+              {dealers.map(d => (
+                <Select.Option key={d.id} value={d.id} label={d.name}>{d.name}</Select.Option>
+              ))}
             </Select>
           </Form.Item>
-          <Form.Item name="template" label="Тип задачи" rules={[{ required: true }]}>
-            <Select placeholder="Выберите шаблон">
-              {TASK_TEMPLATES.map(t => <Select.Option key={t.value} value={t.value}>{t.label}</Select.Option>)}
-            </Select>
-          </Form.Item>
-          <Form.Item name="description" label="Описание" rules={[{ required: true }]}>
+          <Form.Item name="description" label="Описание" rules={[{ required: true, message: 'Введите описание' }]}>
             <TextArea rows={3} placeholder="Описание задачи" />
           </Form.Item>
-          <Form.Item name="dueDate" label="Срок выполнения" rules={[{ required: true }]}>
-            <DatePicker style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="priority" label="Приоритет">
-            <Select>
-              <Select.Option value="high">Высокий</Select.Option>
-              <Select.Option value="medium">Средний</Select.Option>
-              <Select.Option value="low">Низкий</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="files" label="Прикрепить файл">
-            <Upload>
-              <Button icon={<UploadOutlined />}>Загрузить</Button>
-            </Upload>
+          <Form.Item name="dueDate" label="Срок выполнения" rules={[{ required: true, message: 'Укажите срок' }]}>
+            <DatePicker style={{ width: '100%' }} disabledDate={(d) => d && d.isBefore(dayjs().startOf('day'))} />
           </Form.Item>
         </Form>
       </Modal>
@@ -334,30 +495,39 @@ const TerritoryCommunicationsTab: React.FC<TerritoryCommunicationsTabProps> = ({
       <Modal
         title="Добавить контакт"
         open={interactionModalOpen}
-        onCancel={() => setInteractionModalOpen(false)}
+        onCancel={() => {
+          setInteractionModalOpen(false);
+          interactionForm.resetFields();
+        }}
         footer={null}
       >
-        <Form layout="vertical">
-          <Form.Item label="Тип контакта">
+        <Form
+          form={interactionForm}
+          layout="vertical"
+          onFinish={handleCreateInteraction}
+        >
+          <Form.Item name="dealer" label="Дилер" rules={[{ required: true, message: 'Выберите дилера' }]}>
+            <Select placeholder="Выберите дилера" showSearch optionFilterProp="label">
+              {dealers.map(d => (
+                <Select.Option key={d.id} value={d.id} label={d.name}>{d.name}</Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item name="type" label="Тип контакта" rules={[{ required: true, message: 'Выберите тип' }]}>
             <Select placeholder="Выберите тип">
               {INTERACTION_TYPES.map(t => <Select.Option key={t.value} value={t.value}>{t.icon} {t.label}</Select.Option>)}
             </Select>
           </Form.Item>
-          <Form.Item label="Дата и время">
-            <DatePicker showTime style={{ width: '100%' }} />
+          <Form.Item name="date" label="Дата и время">
+            <DatePicker showTime={{ format: 'HH:mm' }} format="DD.MM.YYYY HH:mm" style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="Описание">
+          <Form.Item name="description" label="Описание">
             <TextArea rows={2} placeholder="Краткое описание" />
           </Form.Item>
-          <Form.Item label="Результат">
+          <Form.Item name="result" label="Результат">
             <TextArea rows={2} placeholder="Договорённости" />
           </Form.Item>
-          <Form.Item label="Прикрепить файл">
-            <Upload>
-              <Button icon={<UploadOutlined />}>Загрузить</Button>
-            </Upload>
-          </Form.Item>
-          <Button type="primary" block icon={<SendOutlined />}>Сохранить</Button>
+          <Button type="primary" block htmlType="submit" icon={<SendOutlined />} loading={savingInteraction}>Сохранить</Button>
         </Form>
       </Modal>
     </div>

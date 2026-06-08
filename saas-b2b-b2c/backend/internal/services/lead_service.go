@@ -52,13 +52,12 @@ func (s *LeadService) GetMyLeads(ctx context.Context, managerID uuid.UUID) ([]mo
 	return s.repo.GetLeadsByManager(ctx, managerID)
 }
 
-func (s *LeadService) UpdateStatus(ctx context.Context, managerID, leadID uuid.UUID, status string) error {
-	// Проверяем, что лид принадлежит этому менеджеру (безопасность)
+func (s *LeadService) UpdateStatus(ctx context.Context, managerID, leadID uuid.UUID, status string, disqualifyReason string) error {
 	_, err := s.repo.GetLeadByID(ctx, leadID, managerID)
 	if err != nil {
-		return err // Ошибка доступа или лид не найден
+		return err
 	}
-	return s.repo.UpdateLeadStatus(ctx, leadID, status)
+	return s.repo.UpdateLeadStatus(ctx, leadID, status, disqualifyReason)
 }
 
 func (s *LeadService) AddActivity(ctx context.Context, userID, leadID uuid.UUID, req models.AddLeadActivityRequest) error {

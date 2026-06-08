@@ -1,27 +1,19 @@
 // src/components/Dashboard/FranchiserManagerDashboard.tsx
 import React, { useEffect, Suspense, lazy, useState } from 'react';
-import { useDispatch } from 'react-redux';
-import { Layout, Row, Col, Card, Typography, Tabs, Badge, Avatar, Dropdown, Space, Spin, Statistic, Button, Modal, List, Divider } from 'antd';
-import { 
-  UserOutlined, 
-  LogoutOutlined, 
-  SettingOutlined, 
-  BellOutlined,
-  PercentageOutlined,
+import { Layout, Row, Col, Card, Typography, Tabs, Space, Spin, Statistic } from 'antd';
+import {
   RiseOutlined,
   WarningOutlined,
-  AppstoreOutlined,
-  LineChartOutlined,
-  MessageOutlined,
-  BarChartOutlined,
-  MenuOutlined,
-  SyncOutlined,
+  SunOutlined,
+  MoonOutlined,
 } from '@ant-design/icons';
-import { useRouter } from 'next/router';
-import { logout } from '@/store/authSlice';
 import dayjs from 'dayjs';
 import 'dayjs/locale/ru';
 import { useTerritoryManagerStore, TerritorySummary, DealerMetrics } from '@/store/territoryManagerStore';
+import apiClient from '@/api/axiosClient';
+import { useThemeMode } from '@/components/ThemeProvider';
+import NotificationBell from './NotificationBell';
+import UserMenu from './UserMenu';
 
 dayjs.locale('ru');
 
@@ -42,31 +34,23 @@ interface FranchiserManagerDashboardProps {
     first_name?: string;
     last_name?: string;
     role?: string;
-    territoryName?: string;
-    region?: string;
+    territory?: string;
   };
   title?: string;
 }
 
 const FranchiserManagerDashboard: React.FC<FranchiserManagerDashboardProps> = ({ user, title }) => {
-  const dispatch = useDispatch();
-  const router = useRouter();
-  const { 
-    activeTab, 
-    summary, 
-    isLoading: storeLoading,
-    summaryModalOpen,
-    setActiveTab, 
-    setSummary, 
-    setLoading, 
-    setLastUpdated,
-    setSummaryModalOpen,
+  const {
+    activeTab,
+    summary,
+    setActiveTab,
     setManager,
+    fetchSummary,
+    fetchDealers,
   } = useTerritoryManagerStore();
 
   const [currentTime, setCurrentTime] = useState(dayjs().format('HH:mm'));
   const [currentDate, setCurrentDate] = useState(dayjs().format('D MMMM YYYY, dddd'));
-  const [alerts, setAlerts] = useState(5);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -82,63 +66,30 @@ const FranchiserManagerDashboard: React.FC<FranchiserManagerDashboardProps> = ({
       setManager({
         id: user.id,
         name: `${user.first_name || ''} ${user.last_name || ''}`.trim(),
-        territoryName: user.territoryName || 'Москва и область',
-        region: user.region || 'Центральный федеральный округ',
+        territoryName: user.territory || 'Без территории',
+        region: '',
       });
     }
   }, [user, setManager]);
 
   useEffect(() => {
-    const fetchSummary = async () => {
-      setLoading(true);
-      try {
-        const token = localStorage.getItem('accessToken');
-        const res = await fetch('/api/v1/territory/summary', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setSummary({
-            planCompletionPercent: data.planCompletionPercent || 0,
-            quarterForecastPercent: data.quarterForecastPercent || 0,
-            redZoneDealersCount: data.redZoneDealersCount || 0,
-            avgConversion: data.avgConversion || 0,
-            activeAlerts: data.activeAlerts || 0,
-          });
-          setAlerts(data.activeAlerts || 0);
-        }
-      } catch (e) {
-        setSummary({
-          planCompletionPercent: 82,
-          quarterForecastPercent: 91,
-          redZoneDealersCount: 2,
-          avgConversion: 4.2,
-          activeAlerts: alerts,
-        });
-      } finally {
-        setLoading(false);
-        setLastUpdated(new Date());
-      }
-    };
-
     fetchSummary();
-    const updateInterval = setInterval(fetchSummary, 3 * 60 * 1000);
+    fetchDealers();
+    const updateInterval = setInterval(() => {
+      fetchSummary();
+      fetchDealers();
+    }, 3 * 60 * 1000);
     return () => clearInterval(updateInterval);
-  }, [setSummary, setLoading, setLastUpdated, alerts]);
+  }, [fetchSummary, fetchDealers]);
 
-  const handleLogout = () => {
-    dispatch(logout());
-    router.push('/login');
-  };
-
-  const userMenu = {
-    items: [
-      { key: 'profile', icon: <UserOutlined />, label: 'Профиль' },
-      { key: 'settings', icon: <SettingOutlined />, label: 'Настройки' },
-      { type: 'divider' as const },
-      { key: 'logout', icon: <LogoutOutlined />, label: 'Выйти', onClick: handleLogout },
-    ],
-  };
+  const { theme: themeName, toggleTheme } = useThemeMode();
+  const isDark = themeName === 'dark';
+  const headerStyle = isDark
+    ? { background: '#1f1f1f', borderBottom: '1px solid #303030' }
+    : { background: '#fff', borderBottom: '1px solid #f0f0f0' };
+  const tabStripStyle = isDark
+    ? { background: '#1f1f1f', borderBottom: '1px solid #303030' }
+    : { background: '#fff', borderBottom: '1px solid #f0f0f0' };
 
   const tabItems = [
     { key: 'map', label: 'Карта территории' },
@@ -170,21 +121,14 @@ const FranchiserManagerDashboard: React.FC<FranchiserManagerDashboardProps> = ({
     return '#ff4d4f';
   };
 
-  const getAlertsList = () => [
-    { id: '1', title: 'Дилер "Мебель Москва" - план 68%', desc: 'Отставание от плана на 12%' },
-    { id: '2', title: 'Салон "Диванит Воронеж" - конверсия 1.8%', desc: 'Ниже нормы' },
-    { id: '3', title: 'Новый дилер "МебельЛига"', desc: 'Требует утверждения' },
-  ];
-
   return (
-    <Layout style={{ minHeight: '100vh', background: '#f5f5f5' }}>
+    <Layout style={{ minHeight: '100vh', background: isDark ? '#141414' : '#f5f5f5' }}>
       <AntHeader style={{ 
-        background: '#fff', 
+        ...headerStyle,
         padding: '0 24px', 
         display: 'flex', 
-        alignItems: 'center', 
+        alignItems: 'stretch', 
         justifyContent: 'space-between', 
-        borderBottom: '1px solid #f0f0f0',
         position: 'sticky',
         top: 0,
         zIndex: 100,
@@ -199,14 +143,14 @@ const FranchiserManagerDashboard: React.FC<FranchiserManagerDashboardProps> = ({
               {title || `${user.first_name || ''} ${user.last_name || ''}`.trim()}
             </Title>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {user.territoryName || 'Москва и область'} • {currentDate} {currentTime}
+              {user.territory || 'Территория не указана'} • {currentDate} {currentTime}
             </Text>
           </div>
         </div>
 
-        <Row gutter={[12, 8]} align="middle" style={{ flex: 1, margin: '0 24px', minWidth: 600 }}>
-          <Col xs={12} sm={6} lg={3}>
-            <Card size="small" bodyStyle={{ padding: 8 }}>
+        <Row gutter={[12, 8]} style={{ flex: 1, margin: '0 24px', flexWrap: 'wrap' }}>
+          <Col xs={24} sm={12} lg={6}>
+            <Card size="small" style={{ height: '100%' }} bodyStyle={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', padding: '10px 16px' }}>
               <Statistic 
                 title="Выполнение плана" 
                 value={summary?.planCompletionPercent || 0} 
@@ -216,8 +160,8 @@ const FranchiserManagerDashboard: React.FC<FranchiserManagerDashboardProps> = ({
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6} lg={3}>
-            <Card size="small" bodyStyle={{ padding: 8 }}>
+          <Col xs={24} sm={12} lg={6}>
+            <Card size="small" style={{ height: '100%' }} bodyStyle={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', padding: '10px 16px' }}>
               <Statistic 
                 title="Прогноз квартала" 
                 value={summary?.quarterForecastPercent || 0} 
@@ -228,8 +172,8 @@ const FranchiserManagerDashboard: React.FC<FranchiserManagerDashboardProps> = ({
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6} lg={3}>
-            <Card size="small" bodyStyle={{ padding: 8 }}>
+          <Col xs={24} sm={12} lg={6}>
+            <Card size="small" style={{ height: '100%' }} bodyStyle={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', padding: '10px 16px' }}>
               <Statistic 
                 title="Дилеров в красной" 
                 value={summary?.redZoneDealersCount || 0} 
@@ -238,8 +182,8 @@ const FranchiserManagerDashboard: React.FC<FranchiserManagerDashboardProps> = ({
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6} lg={3}>
-            <Card size="small" bodyStyle={{ padding: 8 }}>
+          <Col xs={24} sm={12} lg={6}>
+            <Card size="small" style={{ height: '100%' }} bodyStyle={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', padding: '10px 16px' }}>
               <Statistic 
                 title="Средняя конверсия" 
                 value={summary?.avgConversion || 0} 
@@ -252,27 +196,22 @@ const FranchiserManagerDashboard: React.FC<FranchiserManagerDashboardProps> = ({
         </Row>
 
         <Space size="middle">
-          <Button 
-            icon={<MenuOutlined />} 
-            onClick={() => setSummaryModalOpen(true)}
+          <NotificationBell />
+          <span
+            onClick={toggleTheme}
+            role="button"
+            aria-label="Переключить тему"
+            style={{ cursor: 'pointer', fontSize: 18, color: isDark ? '#fff' : undefined }}
           >
-            Сводка
-          </Button>
-          <Badge count={alerts} offset={[-5, 5]}>
-            <BellOutlined style={{ fontSize: 20, cursor: 'pointer' }} />
-          </Badge>
-          <Dropdown menu={userMenu} placement="bottomRight">
-            <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-              <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1890ff' }} />
-            </div>
-          </Dropdown>
+            {isDark ? <SunOutlined /> : <MoonOutlined />}
+          </span>
+          <UserMenu user={user as any} />
         </Space>
       </AntHeader>
 
       <Content style={{ padding: 0 }}>
         <div style={{ 
-          background: '#fff', 
-          borderBottom: '1px solid #f0f0f0',
+          ...tabStripStyle,
           padding: '0 24px',
           overflowX: 'auto',
         }}>
@@ -288,43 +227,6 @@ const FranchiserManagerDashboard: React.FC<FranchiserManagerDashboardProps> = ({
           {renderTabContent()}
         </div>
       </Content>
-
-      <Modal
-        title="Утренняя сводка"
-        open={summaryModalOpen}
-        onCancel={() => setSummaryModalOpen(false)}
-        footer={null}
-        width={600}
-      >
-        <List
-          dataSource={getAlertsList()}
-          renderItem={(item) => (
-            <List.Item>
-              <List.Item.Meta
-                title={item.title}
-                description={item.desc}
-              />
-            </List.Item>
-          )}
-        />
-        <Divider />
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Text>Выполнение плана:</Text>
-            <Text strong>{summary?.planCompletionPercent || 0}%</Text>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Text>Прогноз квартала:</Text>
-            <Text strong>{summary?.quarterForecastPercent || 0}%</Text>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Text>Дилеров в красной зоне:</Text>
-            <Text strong style={{ color: summary?.redZoneDealersCount ? '#ff4d4f' : '#52c41a' }}>
-              {summary?.redZoneDealersCount || 0}
-            </Text>
-          </div>
-        </Space>
-      </Modal>
     </Layout>
   );
 };

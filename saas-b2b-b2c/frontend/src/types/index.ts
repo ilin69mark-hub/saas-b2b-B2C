@@ -12,6 +12,9 @@ export interface User {
   phone?: string;
   managed_by?: string;
   tenant_id?: string;
+  territory?: string;
+  status?: string;
+  avatar_url?: string;
 }
 
 /* ---------- Запросы аутентификации ---------- */

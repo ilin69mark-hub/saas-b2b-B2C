@@ -11,7 +11,7 @@ type LeadRepositoryInterface interface {
 	CreateLead(ctx context.Context, lead *models.Lead) error
 	GetLeadsByManager(ctx context.Context, managerID uuid.UUID) ([]models.Lead, error)
 	GetLeadByID(ctx context.Context, leadID, managerID uuid.UUID) (*models.Lead, error)
-	UpdateLeadStatus(ctx context.Context, leadID uuid.UUID, status string) error
+	UpdateLeadStatus(ctx context.Context, leadID uuid.UUID, status string, disqualifyReason string) error
 	AddActivity(ctx context.Context, activity *models.LeadActivity) error
 	GetLeadActivities(ctx context.Context, leadID uuid.UUID) ([]models.LeadActivity, error)
 }

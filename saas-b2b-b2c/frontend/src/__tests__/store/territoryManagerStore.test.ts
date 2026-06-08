@@ -147,18 +147,12 @@ describe('territoryManagerStore', () => {
       expect(useTerritoryManagerStore.getState().isLoading).toBe(false);
     });
 
-    it('falls back to default summary on error', async () => {
+    it('leaves summary null on error (no mock fallback)', async () => {
       mockApiClient.get.mockRejectedValue(new Error('API Error'));
 
       await useTerritoryManagerStore.getState().fetchSummary();
 
-      expect(useTerritoryManagerStore.getState().summary).toEqual({
-        planCompletionPercent: 82,
-        quarterForecastPercent: 91,
-        redZoneDealersCount: 2,
-        avgConversion: 4.2,
-        activeAlerts: 5,
-      });
+      expect(useTerritoryManagerStore.getState().summary).toBeNull();
       expect(useTerritoryManagerStore.getState().isLoading).toBe(false);
     });
 
@@ -222,6 +216,45 @@ describe('territoryManagerStore', () => {
       expect(dealers[0].forecastPercent).toBe(100);
       expect(dealers[1].forecastPercent).toBe(70);
       expect(dealers[2].forecastPercent).toBe(30);
+    });
+
+    it('maps debt, margin, avgCheck, taskCount from backend response', async () => {
+      const mockData = {
+        dealers: [
+          {
+            id: 'd1',
+            dealer_name: 'Dealer With Full Data',
+            salon_count: 2,
+            plan_percent: 85,
+            conversion: 4,
+            debt: 150000,
+            margin: 27.5,
+            avg_check: 320000,
+            task_count: 5,
+          },
+          {
+            id: 'd2',
+            dealer_name: 'Dealer With Missing Fields',
+            salon_count: 1,
+            plan_percent: 60,
+            conversion: 2,
+          },
+        ],
+      };
+
+      mockApiClient.get.mockResolvedValue({ data: mockData });
+
+      await useTerritoryManagerStore.getState().fetchDealers();
+
+      const dealers = useTerritoryManagerStore.getState().dealers;
+      expect(dealers[0].debt).toBe(150000);
+      expect(dealers[0].margin).toBe(27.5);
+      expect(dealers[0].avgCheck).toBe(320000);
+      expect(dealers[0].taskCount).toBe(5);
+      expect(dealers[1].debt).toBe(0);
+      expect(dealers[1].margin).toBe(0);
+      expect(dealers[1].avgCheck).toBe(0);
+      expect(dealers[1].taskCount).toBe(0);
     });
   });
 

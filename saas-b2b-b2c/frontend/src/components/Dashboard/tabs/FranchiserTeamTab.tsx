@@ -15,6 +15,8 @@ import {
 import dynamic from 'next/dynamic';
 import dayjs from 'dayjs';
 import { useCreateEmployeeMutation, useGetFranchiserTeamQuery, useGetFranchiserDealersQuery } from '@/services/userApi';
+import PhoneInput from '@/components/common/PhoneInput';
+import { normalizeForApi } from '@/utils/phone';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -426,12 +428,13 @@ const FranchiserTeamTab: React.FC = () => {
 
   const handleAddManager = async (values: { email: string; password: string; first_name: string; last_name?: string; phone?: string }) => {
     try {
+      const phone = normalizeForApi(String(values.phone || ''));
       await createEmployee({
         email: values.email,
         password: values.password,
         first_name: values.first_name,
         last_name: values.last_name,
-        phone: values.phone ? `+7${values.phone.replace(/[^\d]/g, '')}` : undefined,
+        phone: phone || undefined,
         role: 'franchiser_manager',
       }).unwrap();
       message.success('Менеджер успешно зарегистрирован');
@@ -661,23 +664,7 @@ const FranchiserTeamTab: React.FC = () => {
           </Row>
 
           <Form.Item name="phone" label="Телефон">
-            <Input
-              addonBefore="+7"
-              placeholder="(999) 123-45-67"
-              maxLength={15}
-              onChange={(e) => {
-                const cleaned = e.target.value.replace(/[^\d()\-\s]/g, '');
-                const digits = cleaned.replace(/\D/g, '').slice(0, 10);
-                let formatted = '';
-                if (digits.length > 0) formatted += `(${digits.slice(0, 3)}`;
-                if (digits.length > 3) formatted += `) ${digits.slice(3, 6)}`;
-                if (digits.length > 6) formatted += `-${digits.slice(6, 8)}`;
-                if (digits.length > 8) formatted += `-${digits.slice(8, 10)}`;
-                if (formatted !== cleaned) {
-                  addForm.setFieldsValue({ phone: formatted });
-                }
-              }}
-            />
+            <PhoneInput />
           </Form.Item>
 
           <Space>

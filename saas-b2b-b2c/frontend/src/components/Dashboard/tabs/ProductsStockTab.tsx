@@ -1,13 +1,15 @@
-// src/components/Dashboard/tabs/ProductsStockTab.tsx
-import React, { useState, useMemo } from 'react';
-import { Card, Row, Col, Table, Tag, Select, Typography, Statistic, Space, Button, Empty, Spin, Radio, Tooltip } from 'antd';
-import { DownloadOutlined, WarningOutlined, CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Card, Row, Col, Table, Tag, Select, Typography, Statistic, Space, Button, Empty, Spin, Radio, Tooltip, Alert, message, DatePicker } from 'antd';
+import { DownloadOutlined, ClockCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
+import apiClient from '@/api/axiosClient';
+import dayjs, { Dayjs } from 'dayjs';
 
 const { Text } = Typography;
+const { RangePicker } = DatePicker;
 const { Option } = Select;
 
-export type PeriodType = 'month' | 'quarter' | 'year';
+export type PeriodType = 'month' | 'quarter' | 'year' | 'custom';
 export type CategoryType = 'all' | 'kitchens' | 'soft' | 'case' | 'mattresses';
 
 interface InventoryItem {
@@ -43,31 +45,90 @@ interface SalesDynamics {
   stock: number;
 }
 
-interface ProductsStockTabProps {
-  inventory?: InventoryItem[];
-  lostSales?: LostSalesReason[];
-  returns?: ReturnItem[];
-  salesDynamics?: SalesDynamics[];
-  loading?: boolean;
-  period?: PeriodType;
-  category?: CategoryType;
-  salonId?: string;
-}
-
-const ProductsStockTab: React.FC<ProductsStockTabProps> = ({
-  inventory = [],
-  lostSales = [],
-  returns = [],
-  salesDynamics = [],
-  loading = false,
-  period: initialPeriod = 'month',
-  category: initialCategory = 'all',
-  salonId: initialSalonId = 'all',
-}) => {
-  const [period, setPeriod] = useState<PeriodType>(initialPeriod);
-  const [category, setCategory] = useState<CategoryType>(initialCategory);
-  const [salonId, setSalonId] = useState<string>(initialSalonId);
+const ProductsStockTab: React.FC = () => {
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [lostSales, setLostSales] = useState<LostSalesReason[]>([]);
+  const [returns, setReturns] = useState<ReturnItem[]>([]);
+  const [salesDynamics, setSalesDynamics] = useState<SalesDynamics[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [period, setPeriod] = useState<PeriodType>('month');
+  const [category, setCategory] = useState<CategoryType>('all');
+  const [salonId, setSalonId] = useState<string>('all');
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
+  const [salonList, setSalonList] = useState<{id: string; name: string}[]>([]);
+  const [customDateRange, setCustomDateRange] = useState<[Dayjs, Dayjs] | null>(null);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const params: Record<string, string> = {};
+      if (period === 'custom') {
+        if (customDateRange?.[0]) params.start_date = customDateRange[0].format('YYYY-MM-DD');
+        if (customDateRange?.[1]) params.end_date = customDateRange[1].format('YYYY-MM-DD');
+      } else {
+        params.period = period;
+      }
+      if (salonId !== 'all') params.salon_id = salonId;
+
+      const { data } = await apiClient.get('/dealer/products', { params });
+      setInventory((data.inventory || []).map((item: any) => ({
+        id: item.id,
+        collection: item.collection,
+        category: item.category || '',
+        stockWarehouse: item.stock_warehouse ?? 0,
+        onDisplay: item.on_display ?? 0,
+        soldPeriod: item.sold_period ?? 0,
+        turnoverDays: item.turnover_days ?? 0,
+        totalStockValue: item.total_stock_value ?? 0,
+      })));
+      setLostSales((data.lost_sales || []).map((item: any) => ({
+        reason: item.reason,
+        count: item.count,
+        lostRevenue: item.lost_revenue ?? 0,
+        percent: item.percent ?? 0,
+      })));
+      setReturns((data.returns || []).map((item: any) => ({
+        id: item.id,
+        date: item.date,
+        product: item.product,
+        reason: item.reason || '',
+        amount: item.amount ?? 0,
+        status: item.status,
+      })));
+      setSalesDynamics((data.sales_dynamics || []).map((item: any) => ({
+        month: item.month,
+        sales: item.sales ?? 0,
+        stock: item.stock ?? 0,
+      })));
+      if (data.salons) setSalonList(data.salons);
+    } catch (e) {
+      console.error('Failed to fetch products data', e);
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [period, salonId, customDateRange]);
+
+  useEffect(() => {
+    if (period === 'custom' && !customDateRange?.[0]) return;
+    fetchData();
+  }, [period, salonId, customDateRange, fetchData]);
+
+  const categoryMap: Record<CategoryType, string> = {
+    all: '',
+    kitchens: 'Кухни',
+    soft: 'Мягкая',
+    case: 'Корпусная',
+    mattresses: 'Матрасы',
+  };
+
+  const filteredInventory = useMemo(() => {
+    if (category === 'all') return inventory;
+    const catLabel = categoryMap[category];
+    return inventory.filter(i => i.category === catLabel);
+  }, [inventory, category]);
 
   const totalReturns = useMemo(() => returns.length, [returns]);
   const totalReturnsAmount = useMemo(() => returns.reduce((sum, r) => sum + r.amount, 0), [returns]);
@@ -238,21 +299,23 @@ const ProductsStockTab: React.FC<ProductsStockTabProps> = ({
     return labels[cat];
   };
 
-  const getSalonLabel = (id: string) => {
-    const labels: Record<string, string> = {
-      all: 'Все салоны',
-      salon1: 'Салон Центр',
-      salon2: 'Салон Юг',
-      salon3: 'Салон Север',
-    };
-    return labels[id] || id;
-  };
-
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 50 }}>
         <Spin size="large" />
       </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <Alert
+        message="Ошибка загрузки"
+        description="Не удалось загрузить данные по товарам и складу."
+        type="error"
+        showIcon
+        action={<Button icon={<ReloadOutlined />} onClick={fetchData}>Повторить</Button>}
+      />
     );
   }
 
@@ -270,16 +333,27 @@ const ProductsStockTab: React.FC<ProductsStockTabProps> = ({
               <Radio.Button value="month">Месяц</Radio.Button>
               <Radio.Button value="quarter">Квартал</Radio.Button>
               <Radio.Button value="year">Год</Radio.Button>
+              <Radio.Button value="custom">Произвольный</Radio.Button>
             </Radio.Group>
+            {period === 'custom' && (
+              <RangePicker
+                value={customDateRange as any}
+                onChange={(dates) => {
+                  if (dates && dates[0] && dates[1]) {
+                    setCustomDateRange([dates[0] as Dayjs, dates[1] as Dayjs]);
+                  }
+                }}
+              />
+            )}
             <Select
               value={salonId}
               onChange={setSalonId}
               style={{ width: 180 }}
             >
               <Option value="all">Все салоны</Option>
-              <Option value="salon1">Салон Центр</Option>
-              <Option value="salon2">Салон Юг</Option>
-              <Option value="salon3">Салон Север</Option>
+              {salonList.map(s => (
+                <Option key={s.id} value={s.id}>{s.name}</Option>
+              ))}
             </Select>
             <Select
               value={category}
@@ -303,18 +377,41 @@ const ProductsStockTab: React.FC<ProductsStockTabProps> = ({
             extra={
               <Space>
                 <Tooltip title="Не-ликвид ( > 90 дней)">
-                  <Tag color="red">⚠️ {inventory.filter(i => i.turnoverDays > 90).length}</Tag>
+                  <Tag color="red">⚠️ {filteredInventory.filter(i => i.turnoverDays > 90).length}</Tag>
                 </Tooltip>
                 <Tooltip title="Дефицит (0 на складе + спрос)">
-                  <Tag color="gold">⚠️ {inventory.filter(i => i.stockWarehouse === 0 && i.soldPeriod > 0).length}</Tag>
+                  <Tag color="gold">⚠️ {filteredInventory.filter(i => i.stockWarehouse === 0 && i.soldPeriod > 0).length}</Tag>
                 </Tooltip>
-                <Button icon={<DownloadOutlined />}>Скачать</Button>
+                <Button icon={<DownloadOutlined />} onClick={async () => {
+                  try {
+                    const params: Record<string, string> = {};
+                    if (period === 'custom') {
+                      if (customDateRange?.[0]) params.start_date = customDateRange[0].format('YYYY-MM-DD');
+                      if (customDateRange?.[1]) params.end_date = customDateRange[1].format('YYYY-MM-DD');
+                    } else {
+                      params.period = period;
+                    }
+                    if (salonId !== 'all') params.salon_id = salonId;
+                    const res = await apiClient.get('/dealer/products/export', { params, responseType: 'blob' });
+                    const url = window.URL.createObjectURL(new Blob([res.data]));
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `products-stock-${new Date().toISOString().slice(0, 10)}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                  } catch (e) {
+                    message.error('Ошибка при скачивании отчёта');
+                    console.error(e);
+                  }
+                }}>Скачать</Button>
               </Space>
             }
           >
-            {inventory.length > 0 ? (
+            {filteredInventory.length > 0 ? (
               <Table
-                dataSource={inventory}
+                dataSource={filteredInventory}
                 columns={inventoryColumns}
                 rowKey="id"
                 pagination={{ pageSize: 10, showSizeChanger: true }}
@@ -336,7 +433,7 @@ const ProductsStockTab: React.FC<ProductsStockTabProps> = ({
       {selectedItem && salesDynamics.length > 0 && (
         <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
           <Col xs={24}>
-            <Card title={`📈 Динамика продаж и остатков: ${inventory.find(i => i.id === selectedItem)?.collection}`}>
+            <Card title={`📈 Динамика продаж и остатков: ${filteredInventory.find(i => i.id === selectedItem)?.collection}`}>
               <ResponsiveContainer width="100%" height={250}>
                 <LineChart data={salesDynamics}>
                   <CartesianGrid strokeDasharray="3 3" />

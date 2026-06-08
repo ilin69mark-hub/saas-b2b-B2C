@@ -34,7 +34,6 @@ const DealerPage: React.FC = () => {
     return (
       <Layout style={{ minHeight: '100vh',  }}>
         <Head><title>Личный кабинет дилера</title></Head>
-        <Header />
         <Content style={{ padding: 0 }}>
           <DealerDashboard user={user} title="Личный кабинет дилера" />
         </Content>

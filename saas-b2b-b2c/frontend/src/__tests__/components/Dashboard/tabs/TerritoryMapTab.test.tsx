@@ -68,15 +68,12 @@ describe('TerritoryMapTab', () => {
     expect(avgMargin).toBe(23.5);
   });
 
-  it('calculates conversion color', () => {
-    const getCellColor = (conv: number) => {
-      if (conv >= 3) return '#f6ffed';
-      if (conv >= 2) return '#fffbe6';
-      return '#fff1f0';
-    };
-    expect(getCellColor(4)).toBe('#f6ffed');
-    expect(getCellColor(2.5)).toBe('#fffbe6');
-    expect(getCellColor(1)).toBe('#fff1f0');
+  it('calculates row heatmap color with alpha tint', () => {
+    const getRowHeat = (status: 'green' | 'yellow' | 'red') =>
+      status === 'green' ? '#52c41a20' : status === 'yellow' ? '#fa8c1620' : '#ff4d4f20';
+    expect(getRowHeat('green')).toBe('#52c41a20');
+    expect(getRowHeat('yellow')).toBe('#fa8c1620');
+    expect(getRowHeat('red')).toBe('#ff4d4f20');
   });
 
   it('sorts dealers by field', () => {

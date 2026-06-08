@@ -1,5 +1,20 @@
 import '@testing-library/jest-dom';
 
+jest.mock('next/router', () => ({
+  useRouter: () => ({
+    push: jest.fn(),
+    replace: jest.fn(),
+    back: jest.fn(),
+    forward: jest.fn(),
+    prefetch: jest.fn(),
+    pathname: '/',
+    query: {},
+    asPath: '/',
+    events: { on: jest.fn(), off: jest.fn(), emit: jest.fn() },
+    isReady: true,
+  }),
+}));
+
 window.ResizeObserver = class ResizeObserver {
   observe() {}
   unobserve() {}

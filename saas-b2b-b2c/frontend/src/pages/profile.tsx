@@ -29,6 +29,8 @@ import Link from 'next/link';
 import { RootState } from '@/store';
 import { useGetMyProfileQuery, useUpdateProfileMutation } from '@/services/userApi';
 import type { UpdateProfileRequest } from '@/types';
+import PhoneInput from '@/components/common/PhoneInput';
+import { normalizeForApi } from '@/utils/phone';
 
 const { Title, Text } = Typography;
 const { Content } = Layout;
@@ -99,9 +101,9 @@ const ProfilePage: React.FC = () => {
       const flatData: Record<string, unknown> = {
         contacts_email_visible: values.email_visible,
         contacts_phone_visible: values.phone_visible,
-        contacts_phone: values.phone,
+        contacts_phone: normalizeForApi(String(values.phone || '')),
         contacts_telegram: values.telegram,
-        contacts_whatsapp: values.whatsapp,
+        contacts_whatsapp: normalizeForApi(String(values.whatsapp || '')),
         contacts_working_hours: values.working_hours,
       };
       await updateProfile(flatData as unknown as UpdateProfileRequest).unwrap();
@@ -302,7 +304,7 @@ const ProfilePage: React.FC = () => {
                       <Row gutter={16}>
                         <Col xs={24} md={16}>
                           <Form.Item name="phone" label="Телефон">
-                            <Input placeholder="+7 (999) 123-45-67" />
+                            <PhoneInput />
                           </Form.Item>
                         </Col>
                         <Col xs={24} md={8}>
@@ -326,7 +328,7 @@ const ProfilePage: React.FC = () => {
                       <Row gutter={16}>
                         <Col xs={24} md={16}>
                           <Form.Item name="whatsapp" label="WhatsApp">
-                            <Input placeholder="+7 (999) 123-45-67" />
+                            <PhoneInput />
                           </Form.Item>
                         </Col>
                       </Row>

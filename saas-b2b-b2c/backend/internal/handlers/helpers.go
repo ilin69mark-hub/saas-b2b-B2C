@@ -12,6 +12,24 @@ import (
 
 var ErrUserNotFound = errors.New("user not found")
 var ErrInvalidSession = errors.New("invalid session")
+var ErrAccessDenied = errors.New("access denied")
+
+var allowedTerritoryPeriods = map[string]bool{
+    "week": true, "month": true, "quarter": true, "year": true, "custom": true,
+}
+
+// requireTerritoryManagerRole проверяет, что пользователь имеет доступ к территории
+func requireTerritoryManagerRole(user *models.User) error {
+    if user.Role != models.RoleFranchisorManager && user.Role != models.RoleSuperAdmin && user.Role != models.RoleFranchisor {
+        return ErrAccessDenied
+    }
+    return nil
+}
+
+// validatePeriod проверяет допустимые значения period
+func validatePeriod(period string) bool {
+    return allowedTerritoryPeriods[period]
+}
 
 // getCurrentUser - загружает пользователя из БД по ID из токена
 func getCurrentUser(c *gin.Context) (*models.User, error) {

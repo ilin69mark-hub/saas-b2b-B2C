@@ -44,11 +44,15 @@ func (r *LeadRepository) GetLeadByID(ctx context.Context, leadID, managerID uuid
 }
 
 // UpdateLeadStatus обновляет статус лида
-func (r *LeadRepository) UpdateLeadStatus(ctx context.Context, leadID uuid.UUID, status string) error {
+func (r *LeadRepository) UpdateLeadStatus(ctx context.Context, leadID uuid.UUID, status string, disqualifyReason string) error {
+	updates := map[string]interface{}{"status": status}
+	if disqualifyReason != "" {
+		updates["disqualify_reason"] = disqualifyReason
+	}
 	return r.db.WithContext(ctx).
 		Model(&models.Lead{}).
 		Where("id = ?", leadID).
-		Update("status", status).Error
+		Updates(updates).Error
 }
 
 // AddActivity добавляет запись в историю взаимодействий

@@ -107,11 +107,11 @@ type PendingPayment struct {
 
 // FunnelStage - этап воронки
 type FunnelStage struct {
-	Stage       string `json:"stage"`       // traffic, consultation, measurement, kp, contract, payment
-	Label       string `json:"label"`       // Отображаемое название
-	Count       int    `json:"count"`       // Количество сделок
-	Conversion  int    `json:"conversion"`  // Конверсия в % от предыдущего этапа
-	Sum         float64 `json:"sum"`       // Сумма сделок
+	Stage       string  `json:"stage"`       // traffic, consultation, measurement, kp, contract, payment
+	Label       string  `json:"label"`       // Отображаемое название
+	Count       int     `json:"count"`       // Количество сделок
+	Conversion  float64 `json:"conversion"`  // Конверсия в % от предыдущего этапа
+	Sum         float64 `json:"sum"`         // Сумма сделок
 }
 
 // HotDeal - горячая сделка (КП)
@@ -364,29 +364,87 @@ type ExpenseBreakdown struct {
 	PrevMonthAmount float64 `json:"prev_month_amount"`
 }
 
+// UnitTemplateInput - входные данные для unit-экономики
+type UnitTemplateInput struct {
+	SalePrice          float64 `json:"salePrice"`
+	PurchasePrice      float64 `json:"purchasePrice"`
+	ManagerPercent     float64 `json:"managerPercent"`
+	DeliveryCost       float64 `json:"deliveryCost"`
+	AcquiringPercent   float64 `json:"acquiringPercent"`
+	RentAmortization   float64 `json:"rentAmortization"`
+	AdditionalServices float64 `json:"additionalServices"`
+}
+
+// UnitTemplate - шаблон unit-экономики
+type UnitTemplate struct {
+	ID        string            `json:"id"`
+	DealerID  string            `json:"dealer_id"`
+	Name      string            `json:"name"`
+	Category  string            `json:"category"`
+	Input     UnitTemplateInput `json:"input"`
+	CreatedAt string            `json:"created_at"`
+}
+
+// UnitTemplateRequest - запрос создания шаблона
+type UnitTemplateRequest struct {
+	Name     string            `json:"name"`
+	Category string            `json:"category"`
+	Input    UnitTemplateInput `json:"input"`
+}
+
 // DealerFunnelResponse - воронка для дилера
 type DealerFunnelResponse struct {
-	Stages        []FunnelStage    `json:"stages"`
-	SalonPlanData []SalonPlanData `json:"salon_plan_data"`
+	Stages        []FunnelStage      `json:"stages"`
+	SalonPlanData []SalonPlanData    `json:"salon_plan_data"`
+	ManagerStats  []ManagerStatsData `json:"manager_stats"`
+	BenchmarkData []BenchmarkPoint   `json:"benchmark_data"`
 }
 
 // SalonPlanData - план салона
 type SalonPlanData struct {
-	ID             uuid.UUID `json:"id"`
-	Name           string    `json:"name"`
-	Plan           float64   `json:"plan"`
-	Fact           float64   `json:"fact"`
-	Percent        int       `json:"percent"`
-	Forecast       string    `json:"forecast"`
-	ManagersCount  int       `json:"managers_count"`
-	AvgCheck        float64   `json:"avg_check"`
+	ID            uuid.UUID `json:"id"`
+	Name          string    `json:"name"`
+	Plan          float64   `json:"plan"`
+	Fact          float64   `json:"fact"`
+	Percent       int       `json:"percent"`
+	Forecast      string    `json:"forecast"`
+	ManagersCount int       `json:"managersCount"`
+	AvgCheck      float64   `json:"avgCheck"`
+	ManagerName   string    `json:"managerName"`
+}
+
+// ManagerStatsData - статистика по менеджеру
+type ManagerStatsData struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Salon       string  `json:"salon"`
+	Revenue     float64 `json:"revenue"`
+	PlanPercent float64 `json:"planPercent"`
+	Conversion  float64 `json:"conversion"`
+}
+
+// BenchmarkPoint - точка сравнения конверсии
+type BenchmarkPoint struct {
+	Date                  string  `json:"date"`
+	DealerConversion      float64 `json:"dealerConversion"`
+	NetworkAvgConversion  float64 `json:"networkAvgConversion"`
+}
+
+// DealerSalonBrief - краткая информация о салоне для фильтра
+type DealerSalonBrief struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // DealerProductsResponse - товары для дилера
 type DealerProductsResponse struct {
-	TotalRevenue   float64             `json:"total_revenue"`
-	TopProducts    []DealerTopProduct   `json:"top_products"`
-	Inventory     []DealerInventoryItem `json:"inventory"`
+	TotalRevenue   float64               `json:"total_revenue"`
+	TopProducts    []DealerTopProduct     `json:"top_products"`
+	Inventory      []DealerInventoryItem  `json:"inventory"`
+	LostSales      []LostSaleItem         `json:"lost_sales"`
+	Returns        []ReturnItem           `json:"returns"`
+	SalesDynamics  []SalesDynamicsPoint   `json:"sales_dynamics"`
+	Salons         []DealerSalonBrief     `json:"salons"`
 }
 
 // DealerTopProduct - топ товар
@@ -400,12 +458,39 @@ type DealerTopProduct struct {
 
 // DealerInventoryItem - остаток товара
 type DealerInventoryItem struct {
-	ID             string  `json:"id"`
-	Collection    string  `json:"collection"`
-	StockWarehouse int    `json:"stock_warehouse"`
-	OnDisplay     int     `json:"on_display"`
-	SoldPeriod    int     `json:"sold_period"`
-	TurnoverDays  int     `json:"turnover_days"`
+	ID              string  `json:"id"`
+	Collection      string  `json:"collection"`
+	Category        string  `json:"category"`
+	StockWarehouse  int     `json:"stock_warehouse"`
+	OnDisplay       int     `json:"on_display"`
+	SoldPeriod      int     `json:"sold_period"`
+	TurnoverDays    int     `json:"turnover_days"`
+	TotalStockValue float64 `json:"total_stock_value"`
+}
+
+// LostSaleItem - потерянная продажа
+type LostSaleItem struct {
+	Reason      string  `json:"reason"`
+	Count       int     `json:"count"`
+	LostRevenue float64 `json:"lost_revenue"`
+	Percent     float64 `json:"percent"`
+}
+
+// ReturnItem - возврат
+type ReturnItem struct {
+	ID      string  `json:"id"`
+	Date    string  `json:"date"`
+	Product string  `json:"product"`
+	Reason  string  `json:"reason"`
+	Amount  float64 `json:"amount"`
+	Status  string  `json:"status"`
+}
+
+// SalesDynamicsPoint - точка динамики продаж
+type SalesDynamicsPoint struct {
+	Month string  `json:"month"`
+	Sales float64 `json:"sales"`
+	Stock float64 `json:"stock"`
 }
 
 // === DASHBOARD FRANCHISER ===
@@ -491,16 +576,37 @@ type FranchiserTeamMember struct {
 
 // TerritorySummaryResponse - сводка для территориального менеджера
 type TerritorySummaryResponse struct {
-	PlanCompletionPercent      int `json:"planCompletionPercent"`
-	QuarterForecastPercent    int `json:"quarterForecastPercent"`
-	RedZoneDealersCount       int `json:"redZoneDealersCount"`
-	AvgConversion          float64 `json:"avgConversion"`
-	ActiveAlerts          int     `json:"activeAlerts"`
+	PlanCompletionPercent      int     `json:"planCompletionPercent"`
+	PlanCompletionChange       float64 `json:"planCompletionChange"`
+	QuarterForecastPercent     int     `json:"quarterForecastPercent"`
+	RedZoneDealersCount        int     `json:"redZoneDealersCount"`
+	AvgConversion           float64 `json:"avgConversion"`
+	ActiveAlerts           int     `json:"activeAlerts"`
+}
+
+// LostLead - потерянный лид (не дошёл до продажи)
+type LostLead struct {
+	ID               uuid.UUID `json:"id"`
+	FullName         string    `json:"full_name"`
+	Budget           float64   `json:"budget"`
+	Status           string    `json:"status"`
+	CreatedAt        time.Time `json:"created_at"`
+	DisqualifyReason string    `json:"disqualify_reason"`
+}
+
+// LostLeadStage - группировка потерянных лидов по этапу
+type LostLeadStage struct {
+	Stage string    `json:"stage"`
+	Label string    `json:"label"`
+	Count int       `json:"count"`
+	Leads []LostLead `json:"leads"`
 }
 
 // TerritoryFunnelResponse - воронка
 type TerritoryFunnelResponse struct {
-	Stages []FunnelStage `json:"stages"`
+	Stages    []FunnelStage   `json:"stages"`
+	TotalLeads int            `json:"total_leads"`
+	LostLeads  []LostLeadStage `json:"lost_leads"`
 }
 
 // TerritoryPlanFactResponse - план-факт
@@ -516,13 +622,23 @@ type TerritoryDealerPlanFact struct {
 	DealerName  string   `json:"dealer_name"`
 	Plan        float64  `json:"plan"`
 	Fact        float64  `json:"fact"`
+	Forecast    float64  `json:"forecast"`
 	PlanPercent int     `json:"plan_percent"`
+	Conversion  float64  `json:"conversion"`
+	SalonCount  int      `json:"salon_count"`
+	AvgCheck    float64  `json:"avg_check"`
+	Margin      float64  `json:"margin"`
+	TaskCount   int      `json:"task_count"`
+	Debt        float64  `json:"debt"`
+	Reason      string   `json:"reason"`
+	Actions     string   `json:"actions"`
 }
 
 // TerritoryCommunicationsResponse - коммуникации
 type TerritoryCommunicationsResponse struct {
-	Tasks          []TerritoryTask `json:"tasks"`
-	UnreadMessages int             `json:"unread_messages"`
+	Tasks          []TerritoryTask         `json:"tasks"`
+	Interactions   []TerritoryInteraction  `json:"interactions"`
+	UnreadMessages int                     `json:"unread_messages"`
 }
 
 // TerritoryTask - задача
@@ -532,14 +648,65 @@ type TerritoryTask struct {
 	Status      string    `json:"status"`
 	AssignedTo  uuid.UUID `json:"assigned_to"`
 	DueDate     string    `json:"due_date"`
+	CreatedAt   string    `json:"created_at"`
 }
 
 // TerritoryBenchmarksResponse - бенчмарки
 type TerritoryBenchmarksResponse struct {
-	TerritoryConversion float64 `json:"territory_conversion"`
-	TerritoryAvgCheck    float64 `json:"territory_avg_check"`
-	NetworkAvgConversion float64 `json:"network_avg_conversion"`
-	NetworkAvgCheck      float64 `json:"network_avg_check"`
+	TerritoryConversion float64            `json:"territory_conversion"`
+	TerritoryAvgCheck    float64            `json:"territory_avg_check"`
+	NetworkAvgConversion float64            `json:"network_avg_conversion"`
+	NetworkAvgCheck      float64            `json:"network_avg_check"`
+	SalonBenchmarks     []SalonBenchmark   `json:"salon_benchmarks"`
+}
+
+type SalonBenchmark struct {
+	SalonID    uuid.UUID `json:"salon_id"`
+	SalonName  string    `json:"salon_name"`
+	DealerName string   `json:"dealer_name"`
+	Conversion float64  `json:"conversion"`
+	AvgCheck   float64  `json:"avg_check"`
+}
+
+// DealerDetailSalon - один салон в детализации дилера
+type DealerDetailSalon struct {
+	ID         uuid.UUID `json:"id"`
+	Name       string   `json:"name"`
+	Address    string   `json:"address"`
+	Sales      float64  `json:"sales"`
+	ManagerName string  `json:"manager_name"`
+}
+
+// DealerDetailAlert - один алерт в детализации дилера
+type DealerDetailAlert struct {
+	ID         uuid.UUID `json:"id"`
+	Title      string   `json:"title"`
+	Category   string   `json:"category"`
+	Priority   string   `json:"priority"`
+	CreatedAt  string   `json:"created_at"`
+}
+
+// DealerDetailsResponse - полная детализация дилера (для preview-режима)
+type DealerDetailsResponse struct {
+	DealerID     uuid.UUID          `json:"dealer_id"`
+	DealerName   string             `json:"dealer_name"`
+	Email        string             `json:"email"`
+	Phone        string             `json:"phone"`
+	Status       string             `json:"status"`
+	Plan         float64            `json:"plan"`
+	Fact         float64            `json:"fact"`
+	PlanPercent  int                `json:"plan_percent"`
+	Conversion   float64            `json:"conversion"`
+	AvgCheck     float64            `json:"avg_check"`
+	Margin       float64            `json:"margin"`
+	Debt         float64            `json:"debt"`
+	ManagerID    *uuid.UUID         `json:"manager_id"`
+	ManagerName  string             `json:"manager_name"`
+	Salons       []DealerDetailSalon `json:"salons"`
+	SalesHistory []float64          `json:"sales_history"`
+	PlanHistory  []float64          `json:"plan_history"`
+	RecentAlerts []DealerDetailAlert `json:"recent_alerts"`
+	TaskCount    int                `json:"task_count"`
 }
 
 // === Dealer Additional DTOs ===

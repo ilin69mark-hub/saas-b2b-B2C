@@ -21,8 +21,10 @@ type Lead struct {
     InterestProduct string  `json:"interest_product"`
     Budget          float64 `json:"budget"`
 
-    // Воронка: new, contact, meeting, sale, archive
-    Status string `json:"status" gorm:"default:'new'"`
+	// Воронка: new, contact, meeting, sale, archive
+	Status            string `json:"status" gorm:"default:'new'"`
+	DisqualifyReason string `json:"disqualify_reason" gorm:"default:''"`
+
 
     // Связи
     Activities []LeadActivity `json:"activities,omitempty"`
@@ -54,14 +56,15 @@ func (LeadActivity) TableName() string {
 
 type CreateLeadRequest struct {
     FullName        string  `json:"full_name" binding:"required,min=1,max=255"`
-    Phone           string  `json:"phone" binding:"max=20"`
+    Phone           string  `json:"phone" binding:"omitempty,phone_ru,max=20"`
     Email           string  `json:"email" binding:"omitempty,email,max=255"`
     InterestProduct string  `json:"interest_product" binding:"max=255"`
     Budget          float64 `json:"budget" binding:"gte=0"`
 }
 
 type UpdateLeadStatusRequest struct {
-    Status string `json:"status" binding:"required"`
+	Status           string `json:"status" binding:"required"`
+	DisqualifyReason string `json:"disqualify_reason"`
 }
 
 type AddLeadActivityRequest struct {

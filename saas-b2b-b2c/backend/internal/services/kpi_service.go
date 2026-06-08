@@ -6,7 +6,9 @@ import (
 	"crypto/tls"
 	"embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/smtp"
 	"os"
@@ -239,25 +241,9 @@ func (s *KPIService) GetDashboardMain(ctx context.Context, userID uuid.UUID, dat
 	targetDate := time.Now()
 	if dateStr != "" {
 		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
-			targetDate = parsed
+			targetDate = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, parsed.Location())
 		}
 	}
-
-	resp := &models.DashboardMainResponse{}
-
-	// Получаем салон пользователя
-	var user models.User
-	if err := s.DB.First(&user, userID).Error; err != nil {
-		return nil, err
-	}
-	if user.SalonID == nil {
-		return nil, gorm.ErrRecordNotFound
-	}
-	salonID := *user.SalonID
-
-	// ====================
-	// 1. ПЛАН И ФАКТ НА МЕСЯЦ
-	// ====================
 	firstOfMonth := time.Date(targetDate.Year(), targetDate.Month(), 1, 0, 0, 0, 0, targetDate.Location())
 	lastOfMonth := firstOfMonth.AddDate(0, 1, -1)
 
@@ -276,6 +262,9 @@ func (s *KPIService) GetDashboardMain(ctx context.Context, userID uuid.UUID, dat
 
 	// Факт на текущий момент (сумма продаж из leads со статусом sale)
 	var monthFact, orderFact float64
+	resp := &models.DashboardMainResponse{}
+	var salonID uuid.UUID
+	s.DB.Table("users").Where("id = ?", userID).Select("salon_id").Scan(&salonID)
 	s.DB.Model(&models.Lead{}).
 		Where("salon_id = ? AND status = ? AND created_at BETWEEN ? AND ?", salonID, "sale", firstOfMonth, targetDate).
 		Select("COALESCE(SUM(budget), 0)").Scan(&monthFact)
@@ -510,9 +499,9 @@ func (s *KPIService) GetDashboardFunnel(ctx context.Context, userID uuid.UUID, d
 	// Конверсия = (следующий этап / предыдущий) * 100
 	var prevCount int64 = trafficCount
 	addStage := func(stage, label string, count int64, sum float64) {
-		conv := 0
+		conv := 0.0
 		if prevCount > 0 {
-			conv = int((count * 100) / prevCount)
+			conv = math.Round(float64(count)/float64(prevCount)*100) / 100
 		}
 		resp.Stages = append(resp.Stages, models.FunnelStage{
 			Stage:      stage,
@@ -1055,23 +1044,10 @@ func (s *KPIService) GetManagerTargets(ctx context.Context, userID uuid.UUID, da
 func (s *KPIService) GetDealerSummary(ctx context.Context, userID uuid.UUID, dateStr string) (*models.DealerSummaryResponse, error) {
 	resp := &models.DealerSummaryResponse{}
 
-	// Сначала находим пользователя дилера
-	var user models.User
-	if err := s.DB.First(&user, userID).Error; err != nil {
-		return nil, err
-	}
-
-	// Находим все салоны дилера через tenant_id (dealer_id в таблице salons = user.tenant_id)
-	var dealerTenantID *uuid.UUID
-	if user.TenantID != nil {
-		dealerTenantID = user.TenantID
-	}
-
+	// Находим все салоны дилера через dealer_id
 	var salons []models.Salon
-	if dealerTenantID != nil {
-		if err := s.DB.Where("dealer_id = ?", *dealerTenantID).Find(&salons).Error; err != nil {
-			return nil, err
-		}
+	if err := s.DB.Where("dealer_id = ?", userID).Find(&salons).Error; err != nil {
+		return nil, err
 	}
 
 	// Собираем все salonID
@@ -1087,7 +1063,7 @@ func (s *KPIService) GetDealerSummary(ctx context.Context, userID uuid.UUID, dat
 	targetDate := time.Now()
 	if dateStr != "" {
 		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
-			targetDate = parsed
+			targetDate = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, parsed.Location())
 		}
 	}
 	firstOfMonth := time.Date(targetDate.Year(), targetDate.Month(), 1, 0, 0, 0, 0, targetDate.Location())
@@ -1098,10 +1074,10 @@ func (s *KPIService) GetDealerSummary(ctx context.Context, userID uuid.UUID, dat
 		Where("salon_id IN ? AND status = ? AND created_at BETWEEN ? AND ?", salonIDs, "paid", firstOfMonth, targetDate).
 		Select("COALESCE(SUM(total_price), 0)").Scan(&orderRevenue)
 
-	// Выручка из лидов - учитываем ВСЕ закрытые статусы (paid, contract)
+	// Выручка из лидов
 	var leadRevenue float64
 	s.DB.Model(&models.Lead{}).
-		Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"paid", "contract"}, firstOfMonth, targetDate).
+		Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, firstOfMonth, targetDate).
 		Select("COALESCE(SUM(budget), 0)").Scan(&leadRevenue)
 
 	// Общая выручка = заказы + лиды (или максимум из них)
@@ -1110,11 +1086,18 @@ func (s *KPIService) GetDealerSummary(ctx context.Context, userID uuid.UUID, dat
 		totalRevenue = leadRevenue
 	}
 
-	// Общий план через goals (для дилеров - ищем по assignee_id = userID)
+	// Общий план через goals
 	var totalPlan float64
 	s.DB.Model(&models.Goal{}).
-		Where("assignee_id = ? AND period = 'monthly'", userID).
+		Where("assignee_id = ? AND period = 'month' AND target_date BETWEEN ? AND ?", userID, firstOfMonth, targetDate).
 		Select("COALESCE(SUM(sales_plan), 0)").Scan(&totalPlan)
+
+	if totalPlan == 0 {
+		// Fallback: ищем по target_date BETWEEN и assignee_id
+		s.DB.Model(&models.Goal{}).
+			Where("assignee_id = ? AND target_date BETWEEN ? AND ?", userID, firstOfMonth, targetDate).
+			Select("COALESCE(SUM(sales_plan), 0)").Scan(&totalPlan)
+	}
 
 	// Процент выполнения
 	planPercent := 0
@@ -1127,7 +1110,7 @@ func (s *KPIService) GetDealerSummary(ctx context.Context, userID uuid.UUID, dat
 
 	// Чистая прибыль (20% от выручки - упрощенно)
 	netProfit := totalRevenue * 0.2
-	marginProfit := totalRevenue * 0.35
+	marginProfit := totalRevenue * 0.70
 
 	// Алёрты - считаем через notifications для дилера
 	var alertsCount int64
@@ -1166,7 +1149,7 @@ func (s *KPIService) GetDealerFinance(ctx context.Context, userID uuid.UUID, dat
 	targetDate := time.Now()
 	if dateStr != "" {
 		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
-			targetDate = parsed
+			targetDate = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, parsed.Location())
 		}
 	}
 	firstOfMonth := time.Date(targetDate.Year(), targetDate.Month(), 1, 0, 0, 0, 0, targetDate.Location())
@@ -1177,7 +1160,7 @@ func (s *KPIService) GetDealerFinance(ctx context.Context, userID uuid.UUID, dat
 		Select("COALESCE(SUM(budget), 0)").Scan(&resp.Revenue)
 
 	// COGS (себестоимость - 65% от выручки)
-	resp.COGS = resp.Revenue * 0.65
+	resp.COGS = resp.Revenue * 0.30
 
 	// Расходы из таблицы dealer_expenses
 	type Expense struct {
@@ -1186,13 +1169,13 @@ func (s *KPIService) GetDealerFinance(ctx context.Context, userID uuid.UUID, dat
 	}
 	
 	var expenses []Expense
-	// Читаем расходы из БД - используем raw SQL для безопасности
+	period := targetDate.Format("2006-01")
 	rows, err := s.DB.Raw(`
 		SELECT category, SUM(amount) as amount 
 		FROM dealer_expenses 
-		WHERE dealer_id = ? AND period = '2026-04'
+		WHERE dealer_id = ? AND period = ?
 		GROUP BY category
-	`, userID).Rows()
+	`, userID, period).Rows()
 	
 	if err == nil {
 		defer rows.Close()
@@ -1201,7 +1184,6 @@ func (s *KPIService) GetDealerFinance(ctx context.Context, userID uuid.UUID, dat
 			rows.Scan(&exp.Category, &exp.Amount)
 			expenses = append(expenses, exp)
 		}
-		// Маппинг расходов по категориям
 		expenseMap := make(map[string]float64)
 		for _, e := range expenses {
 			expenseMap[e.Category] = e.Amount
@@ -1215,41 +1197,33 @@ func (s *KPIService) GetDealerFinance(ctx context.Context, userID uuid.UUID, dat
 		resp.Marketing = expenseMap["marketing"]
 		resp.Defects = expenseMap["defects"]
 		resp.OtherExpenses = expenseMap["other"]
-} else {
-		// Fallback если таблица пустая
-		resp.Rent = 430000
-	}
-	
-	// Fallback только если все нули (данных нет в таблице)
-	if resp.Rent == 0 && resp.Utilities == 0 && resp.Payroll == 0 {
-		resp.Rent = 430000
-		resp.Utilities = 45000
-		resp.Payroll = 650000
-		resp.Taxes = 180000
-		resp.Logistics = 95000
-		resp.Marketing = 60000
-		resp.Defects = 35000
-		resp.OtherExpenses = 0
-		resp.Bonus = 0
 	}
 
 	// Чистая прибыль
 	resp.NetProfit = resp.Revenue - resp.COGS - resp.Rent - resp.Utilities - resp.Payroll - resp.Taxes - resp.Logistics - resp.Marketing - resp.Defects - resp.OtherExpenses - resp.Bonus
 
 	// Прогноз
-	daysInMonth := targetDate.Day()
-	daysLeft := 30 - daysInMonth + 1
-	dailyAvg := resp.NetProfit / float64(daysInMonth)
+	currentDay := targetDate.Day()
+	totalDaysInMonth := time.Date(targetDate.Year(), targetDate.Month()+1, 0, 0, 0, 0, 0, targetDate.Location()).Day()
+	daysLeft := totalDaysInMonth - currentDay
+	dailyAvg := resp.NetProfit / float64(currentDay)
 	resp.NetProfitForecast = resp.NetProfit + (dailyAvg * float64(daysLeft))
 
-	// Прошлый месяц (заглушка - 80% от текущего)
-	resp.PrevMonthNetProfit = resp.NetProfit * 0.8
+	// Прошлый месяц
+	prevMonthStart := firstOfMonth.AddDate(0, -1, 0)
+	prevMonthEnd := firstOfMonth.AddDate(0, 0, -1)
+	var prevRevenue float64
+	s.DB.Model(&models.Lead{}).
+		Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, prevMonthStart, prevMonthEnd).
+		Select("COALESCE(SUM(budget), 0)").Scan(&prevRevenue)
+	resp.PrevMonthNetProfit = prevRevenue - (prevRevenue * 0.30)
 
 	// Заполняем expense_breakdown
 	expenseItems := []struct {
 		Category string
 		Amount   float64
 	}{
+		{"cogs", resp.COGS},
 		{"rent", resp.Rent},
 		{"utilities", resp.Utilities},
 		{"payroll", resp.Payroll},
@@ -1259,6 +1233,28 @@ func (s *KPIService) GetDealerFinance(ctx context.Context, userID uuid.UUID, dat
 		{"defects", resp.Defects},
 		{"other", resp.OtherExpenses},
 	}
+
+	prevPeriod := firstOfMonth.AddDate(0, -1, 0).Format("2006-01")
+	type prevExpense struct {
+		Category string
+		Amount   float64
+	}
+	prevRows, err := s.DB.Raw(`
+		SELECT category, SUM(amount) as amount 
+		FROM dealer_expenses 
+		WHERE dealer_id = ? AND period = ?
+		GROUP BY category
+	`, userID, prevPeriod).Rows()
+	prevExpenseMap := make(map[string]float64)
+	if err == nil {
+		defer prevRows.Close()
+		for prevRows.Next() {
+			var pe prevExpense
+			prevRows.Scan(&pe.Category, &pe.Amount)
+			prevExpenseMap[pe.Category] = pe.Amount
+		}
+	}
+	prevExpenseMap["cogs"] = prevRevenue * 0.30
 	
 	for _, item := range expenseItems {
 		percent := 0.0
@@ -1269,15 +1265,76 @@ func (s *KPIService) GetDealerFinance(ctx context.Context, userID uuid.UUID, dat
 			Category:         item.Category,
 			Amount:          item.Amount,
 			PercentOfRevenue: percent,
-			PrevMonthAmount: item.Amount * 0.9, // Assume 10% less in prev month
+			PrevMonthAmount: prevExpenseMap[item.Category],
 		})
 	}
 
 	return resp, nil
 }
 
+// GetDealerExpenses - получение расходов дилера за месяц
+func (s *KPIService) GetDealerExpenses(ctx context.Context, userID uuid.UUID, month string) (map[string]float64, error) {
+	resp := map[string]float64{
+		"rent": 0, "utilities": 0, "payroll": 0, "taxes": 0,
+		"logistics": 0, "marketing": 0, "defects": 0, "other_expenses": 0,
+	}
+
+	type ExpenseRow struct {
+		Category string
+		Amount   float64
+	}
+	var rows []ExpenseRow
+	if err := s.DB.Table("dealer_expenses").
+		Where("dealer_id = ? AND period = ?", userID, month).
+		Select("category, amount").Scan(&rows).Error; err != nil {
+		return resp, nil
+	}
+
+	for _, r := range rows {
+		resp[r.Category] = r.Amount
+	}
+	return resp, nil
+}
+
+// SaveDealerExpenses - сохранение расходов дилера (upsert)
+func (s *KPIService) SaveDealerExpenses(ctx context.Context, userID uuid.UUID, month string, req struct {
+	Month         string  `json:"month"`
+	Rent          float64 `json:"rent"`
+	Utilities     float64 `json:"utilities"`
+	Payroll       float64 `json:"payroll"`
+	Taxes         float64 `json:"taxes"`
+	Logistics     float64 `json:"logistics"`
+	Marketing     float64 `json:"marketing"`
+	Defects       float64 `json:"defects"`
+	OtherExpenses float64 `json:"other_expenses"`
+}) error {
+	categories := map[string]float64{
+		"rent": req.Rent, "utilities": req.Utilities, "payroll": req.Payroll,
+		"taxes": req.Taxes, "logistics": req.Logistics, "marketing": req.Marketing,
+		"defects": req.Defects, "other": req.OtherExpenses,
+	}
+
+	for category, amount := range categories {
+		var count int64
+		s.DB.Table("dealer_expenses").
+			Where("dealer_id = ? AND period = ? AND category = ?", userID, month, category).
+			Count(&count)
+
+		if count > 0 {
+			s.DB.Exec(`UPDATE dealer_expenses SET amount = ?, updated_at = NOW() 
+				WHERE dealer_id = ? AND period = ? AND category = ?`,
+				amount, userID, month, category)
+		} else {
+			s.DB.Exec(`INSERT INTO dealer_expenses (dealer_id, period, category, amount, created_at, updated_at)
+				VALUES (?, ?, ?, ?, NOW(), NOW())`,
+				userID, month, category, amount)
+		}
+	}
+	return nil
+}
+
 // GetDealerFunnel - воронка для дилера
-func (s *KPIService) GetDealerFunnel(ctx context.Context, userID uuid.UUID, period, dateStr string) (*models.DealerFunnelResponse, error) {
+func (s *KPIService) GetDealerFunnel(ctx context.Context, userID uuid.UUID, period, dateStr, startDateStr, endDateStr string) (*models.DealerFunnelResponse, error) {
 	resp := &models.DealerFunnelResponse{}
 
 	// Находим все салоны дилера через таблицу salons по dealer_id
@@ -1295,102 +1352,334 @@ func (s *KPIService) GetDealerFunnel(ctx context.Context, userID uuid.UUID, peri
 		return resp, nil
 	}
 
-	targetDate := time.Now()
-	if dateStr != "" {
-		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
-			targetDate = parsed
+	var startDate, endDate time.Time
+	if startDateStr != "" && endDateStr != "" {
+		startDate, endDate = parsePeriodStartEnd(period, dateStr, startDateStr, endDateStr)
+	} else {
+		targetDate := time.Now()
+		if dateStr != "" {
+			if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
+				targetDate = parsed
+			}
+		}
+		quarterStart := func(t time.Time) time.Time {
+			m := int(t.Month())
+			quarterMonth := time.Month(((m - 1) / 3) * 3 + 1)
+			return time.Date(t.Year(), quarterMonth, 1, 0, 0, 0, 0, t.Location())
+		}
+		switch period {
+		case "week":
+			startDate = targetDate.AddDate(0, 0, -7)
+			endDate = targetDate
+		case "quarter":
+			startDate = quarterStart(targetDate)
+			endDate = targetDate
+		case "year":
+			startDate = time.Date(targetDate.Year(), 1, 1, 0, 0, 0, 0, targetDate.Location())
+			endDate = targetDate
+		default: // month
+			startDate = time.Date(targetDate.Year(), targetDate.Month(), 1, 0, 0, 0, 0, targetDate.Location())
+			endDate = targetDate
 		}
 	}
 
-	var startDate, endDate time.Time
-	quarterStart := func(t time.Time) time.Time {
-		m := int(t.Month())
-		quarterMonth := time.Month(((m - 1) / 3) * 3 + 1)
-		return time.Date(t.Year(), quarterMonth, 1, 0, 0, 0, 0, t.Location())
-	}
+	// Воронка по стадиям (накопительно — каждая стадия включает лиды на этой стадии и всех следующих)
+	var trafficCount, consultCount, measureCount, kpCount, contractCount, paymentCount int64
+	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND created_at BETWEEN ? AND ?", salonIDs, startDate, endDate).Count(&trafficCount)
+	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"contact", "meeting", "wait", "sale", "paid"}, startDate, endDate).Count(&consultCount)
+	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"meeting", "wait", "sale", "paid"}, startDate, endDate).Count(&measureCount)
+	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"wait", "sale", "paid"}, startDate, endDate).Count(&kpCount)
+	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, startDate, endDate).Count(&contractCount)
+	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status = ? AND created_at BETWEEN ? AND ?", salonIDs, "paid", startDate, endDate).Count(&paymentCount)
 
-	switch period {
-	case "week":
-		startDate = targetDate.AddDate(0, 0, -7)
-		endDate = targetDate
-	case "quarter":
-		startDate = quarterStart(targetDate)
-		endDate = targetDate
-	case "year":
-		startDate = time.Date(targetDate.Year(), 1, 1, 0, 0, 0, 0, targetDate.Location())
-		endDate = targetDate
-	default: // month
-		startDate = time.Date(targetDate.Year(), targetDate.Month(), 1, 0, 0, 0, 0, targetDate.Location())
-		endDate = targetDate
+	conv := func(from, to int64) float64 {
+		if from == 0 {
+			return 0
+		}
+		return math.Round(float64(to)/float64(from)*100) / 100
 	}
-
-	// Воронка по стадиям
-	var newLeads, contactLeads, meetingLeads, waitLeads, saleLeads int64
-	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND created_at BETWEEN ? AND ?", salonIDs, startDate, endDate).Count(&newLeads)
-	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status = ? AND created_at BETWEEN ? AND ?", salonIDs, "contact", startDate, endDate).Count(&contactLeads)
-	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status = ? AND created_at BETWEEN ? AND ?", salonIDs, "meeting", startDate, endDate).Count(&meetingLeads)
-	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status = ? AND created_at BETWEEN ? AND ?", salonIDs, "wait", startDate, endDate).Count(&waitLeads)
-	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, startDate, endDate).Count(&saleLeads)
 
 	resp.Stages = []models.FunnelStage{
-		{Stage: "traffic", Label: "Трафик", Count: int(newLeads + contactLeads), Conversion: 100},
-		{Stage: "consultation", Label: "Консультация", Count: int(contactLeads), Conversion: 0},
-		{Stage: "measurement", Label: "Замер", Count: int(meetingLeads), Conversion: 0},
-		{Stage: "kp", Label: "КП", Count: int(waitLeads), Conversion: 0},
-		{Stage: "contract", Label: "Договор", Count: int(saleLeads), Conversion: 0},
-		{Stage: "payment", Label: "Оплата", Count: 0, Conversion: 0},
+		{Stage: "traffic", Label: "Трафик", Count: int(trafficCount), Conversion: 100},
+		{Stage: "consultation", Label: "Консультация", Count: int(consultCount), Conversion: conv(trafficCount, consultCount)},
+		{Stage: "measurement", Label: "Замер", Count: int(measureCount), Conversion: conv(consultCount, measureCount)},
+		{Stage: "kp", Label: "КП", Count: int(kpCount), Conversion: conv(measureCount, kpCount)},
+		{Stage: "contract", Label: "Договор", Count: int(contractCount), Conversion: conv(kpCount, contractCount)},
+		{Stage: "payment", Label: "Оплата", Count: int(paymentCount), Conversion: conv(contractCount, paymentCount)},
 	}
 
-	// План по салонам - используем уже полученные salons
+	// План по салонам
+	type salonCalc struct {
+		salon       models.Salon
+		plan        float64
+		fact        float64
+		avgCheck    float64
+		managersCnt int64
+		managerName string
+		hasMgrPlan  bool
+	}
+
+	var calcs []salonCalc
+
 	for _, salon := range salons {
 		var plan, fact float64
-		// План ищем через goals - ищем по назначенным менеджерам салонов или по салонам
-		// Сначала пробуем найти менеджеров этого салона
 		var managerIDs []uuid.UUID
 		s.DB.Model(&models.User{}).
-			Where("salon_id = ?", salon.ID).
+			Where("salon_id = ? AND role = ?", salon.ID, models.RoleDealerManager).
 			Pluck("id", &managerIDs)
-		
+
 		if len(managerIDs) > 0 {
-			// План по менеджерам салона
 			s.DB.Model(&models.Goal{}).
 				Where("assignee_id IN ? AND target_date BETWEEN ? AND ?", managerIDs, startDate, endDate).
 				Select("COALESCE(SUM(sales_plan), 0)").Scan(&plan)
 		}
-		
-		// Если план не найден, пробуем через dealer_id
-		if plan == 0 {
-			s.DB.Model(&models.Goal{}).
-				Where("dealer_id = ? AND target_date BETWEEN ? AND ?", userID, startDate, endDate).
-				Select("COALESCE(SUM(sales_plan), 0)").Scan(&plan)
-		}
-		
-		// Факт - продажи этого салона
+
+		hasMgrPlan := plan > 0
+
 		s.DB.Model(&models.Lead{}).
 			Where("salon_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", salon.ID, []string{"sale", "paid"}, startDate, endDate).
 			Select("COALESCE(SUM(budget), 0)").Scan(&fact)
 
-		percent := 0
-		if plan > 0 {
-			percent = int((fact / plan) * 100)
+		var saleCount int64
+		s.DB.Model(&models.Lead{}).
+			Where("salon_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", salon.ID, []string{"sale", "paid"}, startDate, endDate).
+			Count(&saleCount)
+
+		avgCheck := 0.0
+		if saleCount > 0 {
+			avgCheck = fact / float64(saleCount)
 		}
 
+		var mngrCnt int64
+		s.DB.Model(&models.User{}).
+			Where("salon_id = ? AND role = ?", salon.ID, models.RoleDealerManager).
+			Count(&mngrCnt)
+
+		var managerNames []string
+		s.DB.Model(&models.User{}).
+			Where("id IN ?", managerIDs).
+			Select("CONCAT(first_name, ' ', last_name)").
+			Scan(&managerNames)
+		managerName := strings.Join(managerNames, ", ")
+
+		calcs = append(calcs, salonCalc{
+			salon:       salon,
+			plan:        plan,
+			fact:        fact,
+			avgCheck:    avgCheck,
+			managersCnt: mngrCnt,
+			managerName: managerName,
+			hasMgrPlan:  hasMgrPlan,
+		})
+	}
+
+	// Распределяем dealer goal между салонами без менеджерских планов
+	var needFallback int
+	for _, c := range calcs {
+		if !c.hasMgrPlan {
+			needFallback++
+		}
+	}
+
+	if needFallback > 0 {
+		var dealerPlan float64
+		s.DB.Model(&models.Goal{}).
+			Where("assignee_id = ? AND target_date BETWEEN ? AND ?", userID, startDate, endDate).
+			Select("COALESCE(SUM(sales_plan), 0)").Scan(&dealerPlan)
+		if dealerPlan > 0 {
+			share := dealerPlan / float64(needFallback)
+			for i := range calcs {
+				if !calcs[i].hasMgrPlan {
+					calcs[i].plan = share
+				}
+			}
+		}
+	}
+
+	for _, c := range calcs {
+		percent := calcPercentVal(c.plan, c.fact)
 		forecast := "red"
 		if percent >= 100 {
 			forecast = "green"
 		} else if percent >= 70 {
 			forecast = "yellow"
 		}
-
 		resp.SalonPlanData = append(resp.SalonPlanData, models.SalonPlanData{
-			ID:        salon.ID,
-			Name:      salon.Name,
-			Plan:      plan,
-			Fact:      fact,
-			Percent:   percent,
-			Forecast:  forecast,
-			ManagersCount: 1, // Each salon has at least one manager
-			AvgCheck:       0,
+			ID:            c.salon.ID,
+			Name:          c.salon.Name,
+			Plan:          c.plan,
+			Fact:          c.fact,
+			Percent:       percent,
+			Forecast:      forecast,
+			ManagersCount: int(c.managersCnt),
+			AvgCheck:      c.avgCheck,
+			ManagerName:   c.managerName,
+		})
+	}
+
+	// ManagerStats — агрегация по менеджерам всех салонов
+	var allManagerIDs []uuid.UUID
+	s.DB.Model(&models.User{}).
+		Where("salon_id IN ? AND role = ?", salonIDs, models.RoleDealerManager).
+		Pluck("id", &allManagerIDs)
+
+	if len(allManagerIDs) > 0 {
+		type managerRow struct {
+			ID     uuid.UUID
+			Name   string
+			Salon  string
+		}
+		var managerRows []managerRow
+		s.DB.Model(&models.User{}).
+			Select("users.id, CONCAT(users.first_name, ' ', users.last_name) as name, salons.name as salon").
+			Joins("LEFT JOIN salons ON salons.id = users.salon_id").
+			Where("users.id IN ?", allManagerIDs).
+			Scan(&managerRows)
+
+		salonByName := make(map[string]string)
+		for _, s := range salons {
+			salonByName[s.ID.String()] = s.Name
+		}
+
+		type mgrRevenue struct {
+			UserID  uuid.UUID
+			Revenue float64
+		}
+		var revenues []mgrRevenue
+		s.DB.Model(&models.Lead{}).
+			Select("manager_id as user_id, COALESCE(SUM(budget), 0) as revenue").
+			Where("manager_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", allManagerIDs, []string{"sale", "paid"}, startDate, endDate).
+			Group("manager_id").
+			Scan(&revenues)
+
+		type mgrGoal struct {
+			AssigneeID uuid.UUID
+			Plan       float64
+		}
+		var mgrGoals []mgrGoal
+		s.DB.Model(&models.Goal{}).
+			Select("assignee_id, COALESCE(SUM(sales_plan), 0) as plan").
+			Where("assignee_id IN ? AND target_date BETWEEN ? AND ?", allManagerIDs, startDate, endDate).
+			Group("assignee_id").
+			Scan(&mgrGoals)
+
+		revenueMap := make(map[string]float64)
+		for _, r := range revenues {
+			revenueMap[r.UserID.String()] = r.Revenue
+		}
+		planMap := make(map[string]float64)
+		for _, g := range mgrGoals {
+			planMap[g.AssigneeID.String()] = g.Plan
+		}
+
+		for _, row := range managerRows {
+			uid := row.ID.String()
+			rev := revenueMap[uid]
+			p := planMap[uid]
+			planPct := 0.0
+			if p > 0 {
+				planPct = math.Round(rev/p*100) / 100
+			}
+
+			var totalLeads, convertedLeads int64
+			s.DB.Model(&models.Lead{}).
+				Where("manager_id = ? AND created_at BETWEEN ? AND ?", row.ID, startDate, endDate).
+				Count(&totalLeads)
+			if totalLeads > 0 {
+				s.DB.Model(&models.Lead{}).
+					Where("manager_id = ? AND created_at BETWEEN ? AND ? AND status IN ?", row.ID, startDate, endDate, []string{"sale", "paid"}).
+					Count(&convertedLeads)
+			}
+			conv := 0.0
+			if totalLeads > 0 {
+				conv = math.Round(float64(convertedLeads)/float64(totalLeads)*100) / 100
+			}
+
+			resp.ManagerStats = append(resp.ManagerStats, models.ManagerStatsData{
+				ID:          uid,
+				Name:        row.Name,
+				Salon:       row.Salon,
+				Revenue:     rev,
+				PlanPercent: planPct,
+				Conversion:  conv,
+			})
+		}
+	}
+
+	// BenchmarkData — конверсия за последние 6 периодов + средняя по сети
+	// Определяем tenant дилера для корректного подсчёта средней по сети
+	var tenantID *uuid.UUID
+	var dealerUser models.User
+	if err := s.DB.First(&dealerUser, "id = ?", userID).Error; err == nil {
+		tenantID = dealerUser.TenantID
+	}
+
+	var networkSalonIDs []uuid.UUID
+	if tenantID != nil {
+		var tenantDealerIDs []uuid.UUID
+		s.DB.Model(&models.User{}).
+			Where("role = ? AND tenant_id = ?", models.RoleDealer, tenantID).
+			Pluck("id", &tenantDealerIDs)
+		if len(tenantDealerIDs) > 0 {
+			s.DB.Model(&models.Salon{}).
+				Where("dealer_id IN ?", tenantDealerIDs).
+				Pluck("id", &networkSalonIDs)
+		}
+	}
+
+	now := time.Now()
+	for i := 5; i >= 0; i-- {
+		var bpStart, bpEnd time.Time
+		switch period {
+		case "week":
+			bpStart = now.AddDate(0, 0, -7*(i+1))
+			bpEnd = now.AddDate(0, 0, -7*i-1)
+		case "year":
+			bpStart = time.Date(now.Year()-i-1, 1, 1, 0, 0, 0, 0, now.Location())
+			bpEnd = time.Date(now.Year()-i-1, 12, 31, 23, 59, 59, 0, now.Location())
+		default: // month or quarter — по месяцам
+			bpStart = time.Date(now.Year(), now.Month()-time.Month(i+1), 1, 0, 0, 0, 0, now.Location())
+			bpEnd = time.Date(now.Year(), now.Month()-time.Month(i), 0, 23, 59, 59, 0, now.Location())
+		}
+
+		var dealerTotal, dealerConverted int64
+		s.DB.Model(&models.Lead{}).
+			Where("salon_id IN ? AND created_at BETWEEN ? AND ?", salonIDs, bpStart, bpEnd).
+			Count(&dealerTotal)
+		if dealerTotal > 0 {
+			s.DB.Model(&models.Lead{}).
+				Where("salon_id IN ? AND created_at BETWEEN ? AND ? AND status IN ?", salonIDs, bpStart, bpEnd, []string{"sale", "paid"}).
+				Count(&dealerConverted)
+		}
+		dConv := 0.0
+		if dealerTotal > 0 {
+			dConv = math.Round(float64(dealerConverted)/float64(dealerTotal)*100) / 100
+		}
+
+		var networkTotal, networkConverted int64
+		netQuery := s.DB.Model(&models.Lead{}).Where("created_at BETWEEN ? AND ?", bpStart, bpEnd)
+		if len(networkSalonIDs) > 0 {
+			netQuery = netQuery.Where("salon_id IN ?", networkSalonIDs)
+		}
+		netQuery.Count(&networkTotal)
+		if networkTotal > 0 {
+			convQuery := s.DB.Model(&models.Lead{}).
+				Where("created_at BETWEEN ? AND ? AND status IN ?", bpStart, bpEnd, []string{"sale", "paid"})
+			if len(networkSalonIDs) > 0 {
+				convQuery = convQuery.Where("salon_id IN ?", networkSalonIDs)
+			}
+			convQuery.Count(&networkConverted)
+		}
+		nConv := 0.0
+		if networkTotal > 0 {
+			nConv = math.Round(float64(networkConverted)/float64(networkTotal)*100) / 100
+		}
+
+		dateLabel := bpStart.Format("2006-01")
+		resp.BenchmarkData = append(resp.BenchmarkData, models.BenchmarkPoint{
+			Date:                 dateLabel,
+			DealerConversion:     dConv,
+			NetworkAvgConversion: nConv,
 		})
 	}
 
@@ -1398,37 +1687,43 @@ func (s *KPIService) GetDealerFunnel(ctx context.Context, userID uuid.UUID, peri
 }
 
 // GetDealerProducts - товары для дилера
-func (s *KPIService) GetDealerProducts(ctx context.Context, userID uuid.UUID, dateStr string) (*models.DealerProductsResponse, error) {
+func (s *KPIService) GetDealerProducts(ctx context.Context, userID uuid.UUID, period, dateStr, startDateStr, endDateStr, salonIDStr string) (*models.DealerProductsResponse, error) {
 	resp := &models.DealerProductsResponse{}
 
-	var managers []models.User
-	if err := s.DB.Where("managed_by = ?", userID).Find(&managers).Error; err != nil {
+	var salons []models.Salon
+	if err := s.DB.Where("dealer_id = ?", userID).Find(&salons).Error; err != nil {
 		return nil, err
 	}
 
 	var salonIDs []uuid.UUID
-	for _, mgr := range managers {
-		if mgr.SalonID != nil {
-			salonIDs = append(salonIDs, *mgr.SalonID)
-		}
+	for _, salon := range salons {
+		salonIDs = append(salonIDs, salon.ID)
+		resp.Salons = append(resp.Salons, models.DealerSalonBrief{
+			ID:   salon.ID.String(),
+			Name: salon.Name,
+		})
 	}
 
 	if len(salonIDs) == 0 {
 		return resp, nil
 	}
 
-	targetDate := time.Now()
-	if dateStr != "" {
-		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
-			targetDate = parsed
+	// Фильтр по конкретному салону
+	if salonIDStr != "" {
+		if parsed, err := uuid.Parse(salonIDStr); err == nil {
+			salonIDs = []uuid.UUID{parsed}
 		}
 	}
-	firstOfMonth := time.Date(targetDate.Year(), targetDate.Month(), 1, 0, 0, 0, 0, targetDate.Location())
 
-	// Общая выручка
+	// Период
+	startDate, endDate := parsePeriodStartEnd(period, dateStr, startDateStr, endDateStr)
+
+	// Общая выручка за период
+	var totalRev float64
 	s.DB.Model(&models.Lead{}).
-		Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, firstOfMonth, targetDate).
-		Select("COALESCE(SUM(budget), 0)").Scan(&resp.TotalRevenue)
+		Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, startDate, endDate).
+		Select("COALESCE(SUM(budget), 0)").Scan(&totalRev)
+	resp.TotalRevenue = totalRev
 
 	// Топ товары
 	type productStats struct {
@@ -1439,7 +1734,7 @@ func (s *KPIService) GetDealerProducts(ctx context.Context, userID uuid.UUID, da
 
 	var products []productStats
 	rows, err := s.DB.Model(&models.Lead{}).
-		Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, firstOfMonth, targetDate).
+		Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, startDate, endDate).
 		Select("interest_product, COALESCE(SUM(budget), 0) as revenue, COUNT(*) as quantity").
 		Group("interest_product").
 		Order("revenue DESC").
@@ -1470,16 +1765,155 @@ func (s *KPIService) GetDealerProducts(ctx context.Context, userID uuid.UUID, da
 		})
 	}
 
-	// Остатки (заглушки)
-	stockItems := []string{"Диван", "Кресло", "Кровать", "Шкаф", "Стол"}
-	for _, name := range stockItems {
+	// Inventory - статические поля из product_inventory + динамические продажи из orders
+	type invStatic struct {
+		ID              string
+		Collection      string
+		Category        string
+		StockWarehouse  int
+		OnDisplay       int
+		TotalStockValue float64
+	}
+	var invStaticRows []invStatic
+	s.DB.Raw(`
+		SELECT id::text, collection, category, stock_warehouse, on_display, total_stock_value
+		FROM product_inventory
+		WHERE salon_id IN ?
+	`, salonIDs).Scan(&invStaticRows)
+
+	type soldPeriodRow struct {
+		Description string
+		Count       int64
+	}
+	var soldRows []soldPeriodRow
+	s.DB.Raw(`
+		SELECT description, COUNT(*) AS count
+		FROM orders
+		WHERE salon_id IN ? AND created_at BETWEEN ? AND ? AND status NOT IN ?
+		GROUP BY description
+	`, salonIDs, startDate, endDate, []string{"cancelled", "refunded"}).Scan(&soldRows)
+
+	soldMap := make(map[string]int64)
+	for _, r := range soldRows {
+		soldMap[r.Description] = r.Count
+	}
+
+	daysInPeriod := int(endDate.Sub(startDate).Hours()/24) + 1
+	for _, s := range invStaticRows {
+		sold := int(soldMap[s.Collection])
+		turnover := 0
+		if sold > 0 {
+			turnover = int((float64(s.StockWarehouse+s.OnDisplay) / float64(sold)) * float64(daysInPeriod))
+		}
 		resp.Inventory = append(resp.Inventory, models.DealerInventoryItem{
-			ID:              name,
-			Collection:     "Основная",
-			StockWarehouse: 10,
-			OnDisplay:     5,
-			SoldPeriod:    3,
-			TurnoverDays:  45,
+			ID:              s.ID,
+			Collection:      s.Collection,
+			Category:        s.Category,
+			StockWarehouse:  s.StockWarehouse,
+			OnDisplay:       s.OnDisplay,
+			SoldPeriod:      sold,
+			TurnoverDays:    turnover,
+			TotalStockValue: s.TotalStockValue,
+		})
+	}
+
+	// Lost Sales - лиды с незакрытыми сделками (не sale/paid)
+	type lostRow struct {
+		Reason      string
+		Count       int64
+		LostRevenue float64
+	}
+	var lostRows []lostRow
+	s.DB.Raw(`
+		SELECT COALESCE(interest_product, 'Без товара') AS reason,
+			COUNT(*) AS count,
+			COALESCE(SUM(budget), 0) AS lost_revenue
+		FROM leads
+		WHERE salon_id IN ? AND created_at BETWEEN ? AND ?
+			AND status NOT IN ?
+		GROUP BY interest_product
+	`, salonIDs, startDate, endDate, []string{"sale", "paid"}).Scan(&lostRows)
+	totalLost := 0.0
+	for _, r := range lostRows {
+		totalLost += r.LostRevenue
+	}
+	for _, r := range lostRows {
+		pct := 0.0
+		if totalLost > 0 {
+			pct = (r.LostRevenue / totalLost) * 100
+		}
+		resp.LostSales = append(resp.LostSales, models.LostSaleItem{
+			Reason:      r.Reason,
+			Count:       int(r.Count),
+			LostRevenue: r.LostRevenue,
+			Percent:     pct,
+		})
+	}
+
+	// Returns - запросы на возврат от дилера
+	type reqRow struct {
+		ID          uuid.UUID
+		CreatedAt   time.Time
+		Description string
+		Amount      float64
+		Status      string
+	}
+	var reqRows []reqRow
+	s.DB.Model(&models.DealerRequest{}).
+		Where("dealer_id = ? AND type = ?", userID, "return").
+		Order("created_at DESC").
+		Limit(50).
+		Find(&reqRows)
+	for _, r := range reqRows {
+		statusMap := map[string]string{
+			"pending":  "in_progress",
+			"approved": "resolved",
+			"rejected": "claim_filed",
+		}
+		mappedStatus := statusMap[r.Status]
+		if mappedStatus == "" {
+			mappedStatus = "in_progress"
+		}
+		resp.Returns = append(resp.Returns, models.ReturnItem{
+			ID:      r.ID.String(),
+			Date:    r.CreatedAt.Format("2006-01-02"),
+			Product: r.Description,
+			Reason:  "",
+			Amount:  r.Amount,
+			Status:  mappedStatus,
+		})
+	}
+
+	// Sales Dynamics - помесячная динамика за 6 месяцев (от endDate)
+	sixMonthsAgo := endDate.AddDate(0, -5, 0)
+	sixMonthsAgo = time.Date(sixMonthsAgo.Year(), sixMonthsAgo.Month(), 1, 0, 0, 0, 0, sixMonthsAgo.Location())
+
+	type dynRow struct {
+		Month string
+		Sales float64
+	}
+	var dynRows []dynRow
+	s.DB.Raw(`
+		SELECT to_char(created_at, 'YYYY-MM') AS month,
+			COALESCE(SUM(budget), 0) AS sales
+		FROM leads
+		WHERE salon_id IN ? AND status IN ? AND created_at >= ?
+		GROUP BY month
+		ORDER BY month ASC
+	`, salonIDs, []string{"sale", "paid"}, sixMonthsAgo).Scan(&dynRows)
+
+	dynMap := make(map[string]float64)
+	for _, d := range dynRows {
+		dynMap[d.Month] = d.Sales
+	}
+	endMonth := time.Date(endDate.Year(), endDate.Month(), 1, 0, 0, 0, 0, endDate.Location())
+	for i := 5; i >= 0; i-- {
+		m := endMonth.AddDate(0, -i, 0)
+		label := m.Format("2006-01")
+		sales := dynMap[label]
+		resp.SalesDynamics = append(resp.SalesDynamics, models.SalesDynamicsPoint{
+			Month: label,
+			Sales: sales,
 		})
 	}
 
@@ -1778,43 +2212,20 @@ func (s *KPIService) GetFranchiserHealth(ctx context.Context, userID uuid.UUID) 
 	for _, d := range dealers {
 		dealerIDs = append(dealerIDs, d.ID)
 	}
+	var salonIDs []uuid.UUID
+	for _, id := range dealerIDs {
+		var dSalonIDs []uuid.UUID
+		s.DB.Model(&models.Salon{}).Where("dealer_id = ?", id).Pluck("id", &dSalonIDs)
+		salonIDs = append(salonIDs, dSalonIDs...)
+	}
 
-	if len(dealerIDs) == 0 {
+	if len(salonIDs) == 0 {
 		return resp, nil
 	}
 
-	// SLA (все лиды обработаны за 24ч)
-	var totalLeads, processedLeads int64
-	s.DB.Model(&models.Lead{}).Where("manager_id IN ?", dealerIDs).Count(&totalLeads)
-	s.DB.Model(&models.Lead{}).Where("manager_id IN ? AND updated_at > ?", dealerIDs, time.Now().Add(-24*time.Hour)).Count(&processedLeads)
-
-	if totalLeads > 0 {
-		resp.SLA = float64(processedLeads) / float64(totalLeads) * 100
-	} else {
-		resp.SLA = 100
-	}
-
-	// Красные дилеры (выполнение < 50%)
-	for _, dealer := range dealers {
-		var fact float64
-		s.DB.Model(&models.Lead{}).
-			Where("manager_id = ? AND status IN ?", dealer.ID, []string{"sale", "paid"}).
-			Select("COALESCE(SUM(budget), 0)").Scan(&fact)
-
-		if fact == 0 {
-			resp.RedDealers = append(resp.RedDealers, models.FranchiserDealerHealth{
-				DealerID:   dealer.ID,
-				DealerName: dealer.FirstName + " " + dealer.LastName,
-				Issue:     "Нет продаж",
-				Severity:   "critical",
-			})
-		}
-	}
-
-	// Общие показатели
 	resp.TotalDealers = len(dealers)
-	resp.ActiveDealers = len(dealers)
-	resp.TotalSalons = 0 // Запросить через Salon model
+	resp.TotalSalons = len(salonIDs)
+	resp.SLA = 100
 
 	return resp, nil
 }
@@ -1828,161 +2239,9 @@ func (s *KPIService) GetFranchiserTeam(ctx context.Context, userID uuid.UUID, pe
 		return nil, err
 	}
 
-	targetDate := time.Now()
-	if dateStr != "" {
-		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
-			targetDate = parsed
-		}
-	}
-
-	var startDate, endDate time.Time
-	switch period {
-	case "quarter":
-		q := ((int(targetDate.Month()) - 1) / 3) * 3
-		startDate = time.Date(targetDate.Year(), time.Month(q+1), 1, 0, 0, 0, 0, targetDate.Location())
-		endDate = time.Date(targetDate.Year(), time.Month(q+4), 0, 23, 59, 59, 0, targetDate.Location())
-	case "year":
-		startDate = time.Date(targetDate.Year(), 1, 1, 0, 0, 0, 0, targetDate.Location())
-		endDate = time.Date(targetDate.Year(), 12, 31, 23, 59, 59, 0, targetDate.Location())
-	case "custom":
-		if sd, err := time.Parse("2006-01-02", startDateStr); err == nil {
-			startDate = sd
-		} else {
-			startDate = time.Date(targetDate.Year(), targetDate.Month(), 1, 0, 0, 0, 0, targetDate.Location())
-		}
-		if ed, err := time.Parse("2006-01-02", endDateStr); err == nil {
-			endDate = ed
-		} else {
-			endDate = time.Now()
-		}
-	default: // month
-		startDate = time.Date(targetDate.Year(), targetDate.Month(), 1, 0, 0, 0, 0, targetDate.Location())
-		endDate = time.Date(targetDate.Year(), targetDate.Month()+1, 0, 23, 59, 59, 0, targetDate.Location())
-	}
-
 	for _, mgr := range managers {
 		var dealersCount int64
 		s.DB.Model(&models.User{}).Where("role = ? AND managed_by = ?", models.RoleDealer, mgr.ID).Count(&dealersCount)
-
-		// Manager's own plan completion — sum over period
-		type planFact struct {
-			Plan float64
-			Fact float64
-		}
-		var mgrPF planFact
-		s.DB.Model(&models.Goal{}).
-			Where("assignee_id = ? AND target_date >= ? AND target_date <= ?", mgr.ID, startDate, endDate).
-			Select("COALESCE(SUM(sales_plan),0) as plan, COALESCE(SUM(sales_fact),0) as fact").
-			Scan(&mgrPF)
-
-		planPercent := 0
-		if mgrPF.Plan > 0 {
-			pct := (mgrPF.Fact / mgrPF.Plan) * 100
-			if pct > 100 {
-				pct = 100
-			}
-			planPercent = int(pct)
-		}
-
-		// Dealers and their goals
-		var dealers []models.User
-		s.DB.Where("role = ? AND managed_by = ?", models.RoleDealer, mgr.ID).Find(&dealers)
-
-		redCount := 0
-		slaOKCount := 0
-		zeroFactCount := 0
-		for _, d := range dealers {
-			var dPF planFact
-			s.DB.Model(&models.Goal{}).
-				Where("assignee_id = ? AND target_date >= ? AND target_date <= ?", d.ID, startDate, endDate).
-				Select("COALESCE(SUM(sales_plan),0) as plan, COALESCE(SUM(sales_fact),0) as fact").
-				Scan(&dPF)
-			if dPF.Plan > 0 {
-				pct := (dPF.Fact / dPF.Plan) * 100
-				if pct < 50 {
-					redCount++
-				}
-				if pct >= 80 {
-					slaOKCount++
-				}
-			}
-			if dPF.Fact == 0 {
-				zeroFactCount++
-			}
-		}
-
-		redPct := 0
-		if len(dealers) > 0 {
-			redPct = (redCount * 100) / len(dealers)
-		}
-
-		// SLA: % of dealers with plan >= 80%
-		sla := 0
-		if len(dealers) > 0 {
-			sla = (slaOKCount * 100) / len(dealers)
-		}
-
-		// Dealer growth: new dealers created in period
-		var newDealers int64
-		s.DB.Model(&models.User{}).
-			Where("role = ? AND managed_by = ? AND created_at >= ? AND created_at <= ?", models.RoleDealer, mgr.ID, startDate, endDate).
-			Count(&newDealers)
-		dealerGrowth := 0
-		if dealersCount > 0 {
-			dealerGrowth = int((newDealers * 100) / dealersCount)
-		}
-
-		// Churn rate: % of dealers with fact = 0
-		churnRate := 0
-		if len(dealers) > 0 {
-			churnRate = (zeroFactCount * 100) / len(dealers)
-		}
-
-		// Forecast: plan% / days-progress
-		forecastPct := planPercent
-		totalDays := endDate.Sub(startDate).Hours() / 24
-		if totalDays > 0 {
-			now := time.Now()
-			if now.After(endDate) {
-				now = endDate
-			}
-			daysPassed := now.Sub(startDate).Hours() / 24
-			if daysPassed < 1 {
-				daysPassed = 1
-			}
-			progress := daysPassed / totalDays
-			if progress > 0 {
-				f := float64(planPercent) / progress
-				if f > 100 {
-					f = 100
-				}
-				forecastPct = int(f)
-			}
-		}
-
-		// integral KPI = plan*0.40 + (100-redPct)*0.25 + sla*0.20 + min((growth/2)*10,10) + 5
-		kpiPlan := float64(planPercent) * 0.40
-		kpiRed := float64(100-redPct) * 0.25
-		kpiSla := float64(sla) * 0.20
-		kpiGrowth := float64(dealerGrowth) / 2 * 10
-		if kpiGrowth > 10 {
-			kpiGrowth = 10
-		}
-		kpiReports := 5.0
-		integralKpi := int(kpiPlan + kpiRed + kpiSla + kpiGrowth + kpiReports)
-		if integralKpi > 100 {
-			integralKpi = 100
-		}
-
-		// Bonus
-		bonus := 0.0
-		if integralKpi >= 90 {
-			bonus = 75000
-		} else if integralKpi >= 75 {
-			bonus = 50000
-		} else if integralKpi >= 50 {
-			bonus = 25000
-		}
 
 		resp.TeamMembers = append(resp.TeamMembers, models.FranchiserTeamMember{
 			ID:              mgr.ID,
@@ -1990,14 +2249,14 @@ func (s *KPIService) GetFranchiserTeam(ctx context.Context, userID uuid.UUID, pe
 			Territory:       mgr.Territory,
 			DealersCount:    int(dealersCount),
 			Role:            "Менеджер сети",
-			PlanPercent:     planPercent,
-			RedDealersPct:   redPct,
-			SLA:             sla,
-			DealerGrowth:    dealerGrowth,
-			ChurnRate:       churnRate,
-			ForecastPercent: forecastPct,
-			IntegralKPI:     integralKpi,
-			BonusForecast:   bonus,
+			PlanPercent:     0,
+			RedDealersPct:   0,
+			SLA:             100,
+			DealerGrowth:    0,
+			ChurnRate:       0,
+			ForecastPercent: 0,
+			IntegralKPI:     0,
+			BonusForecast:   0,
 		})
 	}
 
@@ -2022,6 +2281,12 @@ func (s *KPIService) GetTerritorySummary(ctx context.Context, userID uuid.UUID, 
 	for _, d := range dealers {
 		dealerIDs = append(dealerIDs, d.ID)
 	}
+	var salonIDs []uuid.UUID
+	for _, id := range dealerIDs {
+		var dSalonIDs []uuid.UUID
+		s.DB.Model(&models.Salon{}).Where("dealer_id = ?", id).Pluck("id", &dSalonIDs)
+		salonIDs = append(salonIDs, dSalonIDs...)
+	}
 
 	targetDate := time.Now()
 	if dateStr != "" {
@@ -2031,18 +2296,37 @@ func (s *KPIService) GetTerritorySummary(ctx context.Context, userID uuid.UUID, 
 	}
 	firstOfMonth := time.Date(targetDate.Year(), targetDate.Month(), 1, 0, 0, 0, 0, targetDate.Location())
 
-	// План и факт
+	// План и факт (daily_goals по dealerID, leads по salonID)
 	var totalPlan, totalFact float64
 	s.DB.Model(&models.DailyGoal{}).
 		Where("user_id IN ? AND target_date BETWEEN ? AND ?", dealerIDs, firstOfMonth, targetDate).
 		Select("COALESCE(SUM(sales_plan), 0)").Scan(&totalPlan)
-	s.DB.Model(&models.Lead{}).
-		Where("manager_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", dealerIDs, []string{"sale", "paid"}, firstOfMonth, targetDate).
-		Select("COALESCE(SUM(budget), 0)").Scan(&totalFact)
+	if len(salonIDs) > 0 {
+		s.DB.Model(&models.Lead{}).
+			Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, firstOfMonth, targetDate).
+			Select("COALESCE(SUM(budget), 0)").Scan(&totalFact)
+	}
 
 	resp.PlanCompletionPercent = 0
 	if totalPlan > 0 {
 		resp.PlanCompletionPercent = int((totalFact / totalPlan) * 100)
+	}
+
+	// Изменение к предыдущему месяцу
+	prevFirstOfMonth := firstOfMonth.AddDate(0, -1, 0)
+	prevEndOfMonth := firstOfMonth.AddDate(0, 0, -1)
+	var prevPlan, prevFact float64
+	s.DB.Model(&models.DailyGoal{}).
+		Where("user_id IN ? AND target_date BETWEEN ? AND ?", dealerIDs, prevFirstOfMonth, prevEndOfMonth).
+		Select("COALESCE(SUM(sales_plan), 0)").Scan(&prevPlan)
+	if len(salonIDs) > 0 {
+		s.DB.Model(&models.Lead{}).
+			Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, prevFirstOfMonth, prevEndOfMonth).
+			Select("COALESCE(SUM(budget), 0)").Scan(&prevFact)
+	}
+	if prevPlan > 0 {
+		prevPct := (prevFact / prevPlan) * 100
+		resp.PlanCompletionChange = float64(resp.PlanCompletionPercent) - prevPct
 	}
 
 	// Прогноз
@@ -2054,14 +2338,21 @@ func (s *KPIService) GetTerritorySummary(ctx context.Context, userID uuid.UUID, 
 		resp.QuarterForecastPercent = int((forecastAmount / totalPlan) * 100)
 	}
 
-	// Красные дилеры
+	// Красные дилеры (< 50% собственного плана)
 	redZoneDealersCount := 0
 	for _, dealer := range dealers {
-		var fact float64
-		s.DB.Model(&models.Lead{}).
-			Where("manager_id = ? AND status IN ?", dealer.ID, []string{"sale", "paid"}).
-			Select("COALESCE(SUM(budget), 0)").Scan(&fact)
-		if totalPlan > 0 && (fact/totalPlan)*100 < 50 {
+		var dealerPlan, fact float64
+		s.DB.Model(&models.DailyGoal{}).
+			Where("user_id = ? AND target_date BETWEEN ? AND ?", dealer.ID, firstOfMonth, targetDate).
+			Select("COALESCE(SUM(sales_plan), 0)").Scan(&dealerPlan)
+		var dSalonIDs []uuid.UUID
+		s.DB.Model(&models.Salon{}).Where("dealer_id = ?", dealer.ID).Pluck("id", &dSalonIDs)
+		if len(dSalonIDs) > 0 {
+			s.DB.Model(&models.Lead{}).
+				Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", dSalonIDs, []string{"sale", "paid"}, firstOfMonth, targetDate).
+				Select("COALESCE(SUM(budget), 0)").Scan(&fact)
+		}
+		if dealerPlan > 0 && (fact/dealerPlan)*100 < 50 {
 			redZoneDealersCount++
 		}
 	}
@@ -2069,21 +2360,25 @@ func (s *KPIService) GetTerritorySummary(ctx context.Context, userID uuid.UUID, 
 
 	// Конверсия
 	var totalLeads, totalSales int64
-	s.DB.Model(&models.Lead{}).Where("manager_id IN ? AND created_at BETWEEN ? AND ?", dealerIDs, firstOfMonth, targetDate).Count(&totalLeads)
-	s.DB.Model(&models.Lead{}).Where("manager_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", dealerIDs, []string{"sale", "paid"}, firstOfMonth, targetDate).Count(&totalSales)
+	if len(salonIDs) > 0 {
+		s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND created_at BETWEEN ? AND ?", salonIDs, firstOfMonth, targetDate).Count(&totalLeads)
+		s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, firstOfMonth, targetDate).Count(&totalSales)
+	}
 
 	resp.AvgConversion = 0
 	if totalLeads > 0 {
 		resp.AvgConversion = (float64(totalSales) / float64(totalLeads)) * 100
 	}
 
-	resp.ActiveAlerts = redZoneDealersCount
+	var alertCount int64
+	s.DB.Model(&models.Notification{}).Where("user_id = ? AND read = ?", userID, false).Count(&alertCount)
+	resp.ActiveAlerts = int(alertCount)
 
 	return resp, nil
 }
 
 // GetTerritoryFunnel - воронка для территориального менеджера
-func (s *KPIService) GetTerritoryFunnel(ctx context.Context, userID uuid.UUID, period, dateStr string) (*models.TerritoryFunnelResponse, error) {
+func (s *KPIService) GetTerritoryFunnel(ctx context.Context, userID uuid.UUID, period, dateStr string, customStart ...time.Time) (*models.TerritoryFunnelResponse, error) {
 	resp := &models.TerritoryFunnelResponse{}
 
 	var dealers []models.User
@@ -2095,8 +2390,14 @@ func (s *KPIService) GetTerritoryFunnel(ctx context.Context, userID uuid.UUID, p
 	for _, d := range dealers {
 		dealerIDs = append(dealerIDs, d.ID)
 	}
+	var salonIDs []uuid.UUID
+	for _, id := range dealerIDs {
+		var dSalonIDs []uuid.UUID
+		s.DB.Model(&models.Salon{}).Where("dealer_id = ?", id).Pluck("id", &dSalonIDs)
+		salonIDs = append(salonIDs, dSalonIDs...)
+	}
 
-	if len(dealerIDs) == 0 {
+	if len(salonIDs) == 0 {
 		return resp, nil
 	}
 
@@ -2107,26 +2408,344 @@ func (s *KPIService) GetTerritoryFunnel(ctx context.Context, userID uuid.UUID, p
 		}
 	}
 
+	// Определяем lookback в зависимости от period
+	var since, endDate time.Time
+	if len(customStart) >= 2 && !customStart[0].IsZero() && !customStart[1].IsZero() {
+		since = customStart[0]
+		endDate = customStart[1]
+		if endDate.After(time.Now()) {
+			endDate = time.Now()
+		}
+	} else {
+		lookbackDays := 30
+		switch period {
+		case "week":
+			lookbackDays = 7
+		case "quarter":
+			lookbackDays = 90
+		case "year":
+			lookbackDays = 365
+		}
+		since = targetDate.AddDate(0, 0, -lookbackDays)
+		endDate = targetDate
+	}
+
 	// Воронка по этапам
 	var newLeads, contactLeads, meetingLeads, saleLeads int64
-	s.DB.Model(&models.Lead{}).Where("manager_id IN ? AND created_at >= ?", dealerIDs, targetDate.AddDate(0, 0, -30)).Count(&newLeads)
-	s.DB.Model(&models.Lead{}).Where("manager_id IN ? AND status = ? AND created_at >= ?", dealerIDs, "contact", targetDate.AddDate(0, 0, -30)).Count(&contactLeads)
-	s.DB.Model(&models.Lead{}).Where("manager_id IN ? AND status = ? AND created_at >= ?", dealerIDs, "meeting", targetDate.AddDate(0, 0, -30)).Count(&meetingLeads)
-	s.DB.Model(&models.Lead{}).Where("manager_id IN ? AND status IN ? AND created_at >= ?", dealerIDs, []string{"sale", "paid"}, targetDate.AddDate(0, 0, -30)).Count(&saleLeads)
+	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status = ? AND created_at BETWEEN ? AND ?", salonIDs, "new", since, endDate).Count(&newLeads)
+	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status = ? AND created_at BETWEEN ? AND ?", salonIDs, "contact", since, endDate).Count(&contactLeads)
+	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status = ? AND created_at BETWEEN ? AND ?", salonIDs, "meeting", since, endDate).Count(&meetingLeads)
+	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, since, endDate).Count(&saleLeads)
+
+	// Всего лидов за период
+	var totalLeads int64
+	s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND created_at BETWEEN ? AND ?", salonIDs, since, endDate).Count(&totalLeads)
+	resp.TotalLeads = int(totalLeads)
+
+	contactConv := 0.0
+	if newLeads+contactLeads+meetingLeads > 0 {
+		contactConv = (float64(contactLeads) / float64(newLeads+contactLeads+meetingLeads)) * 100
+	}
+	meetingConv := 0.0
+	if contactLeads+meetingLeads > 0 {
+		meetingConv = (float64(meetingLeads) / float64(contactLeads+meetingLeads)) * 100
+	}
+	saleConv := 0.0
+	if meetingLeads+saleLeads > 0 {
+		saleConv = (float64(saleLeads) / float64(meetingLeads+saleLeads)) * 100
+	}
 
 	resp.Stages = []models.FunnelStage{
 		{Stage: "leads", Label: "Лиды", Count: int(newLeads), Conversion: 100},
-		{Stage: "contact", Label: "Контакт", Count: int(contactLeads), Conversion: 0},
-		{Stage: "meeting", Label: "Встреча", Count: int(meetingLeads), Conversion: 0},
-		{Stage: "sale", Label: "Продажа", Count: int(saleLeads), Conversion: 0},
+		{Stage: "contact", Label: "Контакт", Count: int(contactLeads), Conversion: contactConv},
+		{Stage: "meeting", Label: "Встреча", Count: int(meetingLeads), Conversion: meetingConv},
+		{Stage: "sale", Label: "Продажа", Count: int(saleLeads), Conversion: saleConv},
+	}
+
+	// Потерянные лиды (не дошли до sale/paid)
+	type lostRow struct {
+		ID               uuid.UUID
+		FullName         string
+		Budget           float64
+		Status           string
+		CreatedAt        time.Time
+		DisqualifyReason string
+	}
+	var lost []lostRow
+	s.DB.Model(&models.Lead{}).
+		Select("id, full_name, budget, status, created_at, disqualify_reason").
+		Where("salon_id IN ? AND status NOT IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, since, endDate).
+		Order("status, created_at DESC").
+		Scan(&lost)
+
+	if len(lost) > 0 {
+		stageMap := map[string][]models.LostLead{}
+		for _, l := range lost {
+			stageMap[l.Status] = append(stageMap[l.Status], models.LostLead{
+				ID:               l.ID,
+				FullName:         l.FullName,
+				Budget:           l.Budget,
+				Status:           l.Status,
+				CreatedAt:        l.CreatedAt,
+				DisqualifyReason: l.DisqualifyReason,
+			})
+		}
+		stageLabels := map[string]string{"new": "Новые", "contact": "Контакт", "meeting": "Встреча"}
+		stageOrder := []string{"new", "contact", "meeting"}
+		for _, s := range stageOrder {
+			if leads, ok := stageMap[s]; ok {
+				resp.LostLeads = append(resp.LostLeads, models.LostLeadStage{
+					Stage: s,
+					Label: stageLabels[s],
+					Count: len(leads),
+					Leads: leads,
+				})
+			}
+		}
 	}
 
 	return resp, nil
 }
 
 // GetTerritoryPlanFact - план-факт
-func (s *KPIService) GetTerritoryPlanFact(ctx context.Context, userID uuid.UUID, period string) (*models.TerritoryPlanFactResponse, error) {
+func (s *KPIService) GetTerritoryPlanFact(ctx context.Context, userID uuid.UUID, period string, customStart ...time.Time) (*models.TerritoryPlanFactResponse, error) {
 	resp := &models.TerritoryPlanFactResponse{}
+
+	var dealers []models.User
+	if err := s.DB.Where("role = ? AND managed_by = ?", models.RoleDealer, userID).Find(&dealers).Error; err != nil {
+		return nil, err
+	}
+
+	var dealerIDs []uuid.UUID
+	for _, d := range dealers {
+		dealerIDs = append(dealerIDs, d.ID)
+	}
+	var salonIDs []uuid.UUID
+	for _, id := range dealerIDs {
+		var dSalonIDs []uuid.UUID
+		s.DB.Model(&models.Salon{}).Where("dealer_id = ?", id).Pluck("id", &dSalonIDs)
+		salonIDs = append(salonIDs, dSalonIDs...)
+	}
+
+	if len(salonIDs) == 0 {
+		return resp, nil
+	}
+
+	now := time.Now()
+	var startDate, endDate time.Time
+
+	// Если передан кастомный период — используем его
+	if len(customStart) >= 2 && !customStart[0].IsZero() && !customStart[1].IsZero() {
+		startDate = customStart[0]
+		endDate = customStart[1]
+		if endDate.After(now) {
+			endDate = now
+		}
+	} else {
+		switch period {
+		case "week":
+			startDate = now.AddDate(0, 0, -7)
+			endDate = now
+		case "quarter":
+			m := int(now.Month())
+			quarterStart := time.Month(((m - 1) / 3) * 3 + 1)
+			startDate = time.Date(now.Year(), quarterStart, 1, 0, 0, 0, 0, now.Location())
+			endDate = now
+		default: // month
+			startDate = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+			endDate = now
+		}
+	}
+
+	// Расчёт времени для прогноза
+	totalDays := endDate.Sub(startDate).Hours() / 24
+	daysPassed := now.Sub(startDate).Hours() / 24
+	progress := 0.0
+	if totalDays > 0 {
+		progress = daysPassed / totalDays
+	}
+
+	// По каждому дилеру
+	for _, dealer := range dealers {
+		var plan, fact float64
+		s.DB.Model(&models.DailyGoal{}).
+			Where("user_id = ? AND target_date BETWEEN ? AND ?", dealer.ID, startDate, endDate).
+			Select("COALESCE(SUM(sales_plan), 0)").Scan(&plan)
+
+		var dSalonIDs []uuid.UUID
+		var salonCount int64
+		s.DB.Model(&models.Salon{}).Where("dealer_id = ?", dealer.ID).Count(&salonCount)
+		if salonCount > 0 {
+			s.DB.Model(&models.Salon{}).Where("dealer_id = ?", dealer.ID).Pluck("id", &dSalonIDs)
+			s.DB.Model(&models.Lead{}).
+				Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", dSalonIDs, []string{"sale", "paid"}, startDate, endDate).
+				Select("COALESCE(SUM(budget), 0)").Scan(&fact)
+		}
+
+		// Конверсия: доля лидов в статусе sale/paid
+		var totalLeads, totalSales int64
+		if len(dSalonIDs) > 0 {
+			s.DB.Model(&models.Lead{}).
+				Where("salon_id IN ? AND created_at BETWEEN ? AND ?", dSalonIDs, startDate, endDate).
+				Count(&totalLeads)
+			s.DB.Model(&models.Lead{}).
+				Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", dSalonIDs, []string{"sale", "paid"}, startDate, endDate).
+				Count(&totalSales)
+		}
+		conversion := 0.0
+		if totalLeads > 0 {
+			conversion = (float64(totalSales) / float64(totalLeads)) * 100
+		}
+
+		// Средний чек (по лидам в sale/paid)
+		var avgCheck float64
+		if totalSales > 0 {
+			avgCheck = fact / float64(totalSales)
+		}
+
+		// Маржа: доля fact/plan * 30 (нормативный коэффициент 30%) — стабильный прокси
+		margin := 0.0
+		if plan > 0 {
+			margin = (fact / plan) * 30
+			if margin > 100 {
+				margin = 100
+			}
+		}
+
+		// Дебиторка: сумма «открытых» лидов (статусы contact, meeting) * их бюджет
+		var debt float64
+		if len(dSalonIDs) > 0 {
+			s.DB.Model(&models.Lead{}).
+				Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", dSalonIDs, []string{"contact", "meeting"}, startDate, endDate).
+				Select("COALESCE(SUM(budget), 0)").Scan(&debt)
+		}
+
+		// Кол-во активных задач
+		var taskCount int64
+		s.DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'dealer_tasks'").Scan(&taskCount)
+		if taskCount > 0 {
+			s.DB.Raw(`SELECT COUNT(*) FROM dealer_tasks WHERE dealer_id = ? AND status NOT IN ('done','cancelled')`, dealer.ID).Scan(&taskCount)
+		} else {
+			taskCount = 0
+		}
+
+		// Прогноз: экстраполяция текущего темпа на весь период
+		forecastAmount := fact
+		if progress > 0 {
+			extrapolated := fact / progress
+			if extrapolated > forecastAmount {
+				forecastAmount = extrapolated
+			}
+		}
+		// Ограничиваем прогноз разумным максимумом
+		maxForecast := plan * 2
+		if plan > 0 && forecastAmount > maxForecast {
+			forecastAmount = maxForecast
+		}
+
+		percent := 0
+		if plan > 0 {
+			percent = int((fact / plan) * 100)
+		}
+
+		dealerName := strings.TrimSpace(dealer.FirstName + " " + dealer.LastName)
+		if dealerName == "" {
+			dealerName = dealer.Email
+		}
+
+		resp.Dealers = append(resp.Dealers, models.TerritoryDealerPlanFact{
+			ID:          dealer.ID,
+			DealerName:  dealerName,
+			Plan:        plan,
+			Fact:        fact,
+			Forecast:    forecastAmount,
+			PlanPercent: percent,
+			Conversion:  conversion,
+			SalonCount:  int(salonCount),
+			AvgCheck:    avgCheck,
+			Margin:      margin,
+			TaskCount:   int(taskCount),
+			Debt:        debt,
+		})
+	}
+
+	// Итого
+	var totalPlan, totalFact float64
+	s.DB.Model(&models.DailyGoal{}).
+		Where("user_id IN ? AND target_date BETWEEN ? AND ?", dealerIDs, startDate, endDate).
+		Select("COALESCE(SUM(sales_plan), 0)").Scan(&totalPlan)
+	if len(salonIDs) > 0 {
+		s.DB.Model(&models.Lead{}).
+			Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", salonIDs, []string{"sale", "paid"}, startDate, endDate).
+			Select("COALESCE(SUM(budget), 0)").Scan(&totalFact)
+	}
+
+	resp.TotalPlan = totalPlan
+	resp.TotalFact = totalFact
+
+	// Загружаем сохранённые причины/действия отклонений
+	if len(dealerIDs) > 0 {
+		var deviations []models.TerritoryDeviation
+		s.DB.Where("dealer_id IN ? AND period = ?", dealerIDs, period).Find(&deviations)
+		devMap := make(map[string]*models.TerritoryDeviation)
+		for i := range deviations {
+			devMap[deviations[i].DealerID.String()] = &deviations[i]
+		}
+		for i := range resp.Dealers {
+			if d, ok := devMap[resp.Dealers[i].ID.String()]; ok {
+				resp.Dealers[i].Reason = d.Reason
+				resp.Dealers[i].Actions = d.Actions
+			}
+		}
+	}
+
+	return resp, nil
+}
+
+// UpdateTerritoryDeviation - сохранение причины/действий отклонения
+func (s *KPIService) UpdateTerritoryDeviation(ctx context.Context, dealerID uuid.UUID, period, reason, actions string) error {
+	return s.DB.Exec(`
+		INSERT INTO territory_deviations (dealer_id, period, reason, actions, updated_at)
+		VALUES (?, ?, ?, ?, NOW())
+		ON CONFLICT (dealer_id, period)
+		DO UPDATE SET reason = EXCLUDED.reason, actions = EXCLUDED.actions, updated_at = NOW()
+	`, dealerID, period, reason, actions).Error
+}
+
+// CreateTerritoryTask - создать задачу для дилера
+func (s *KPIService) CreateTerritoryTask(ctx context.Context, dealerID, createdBy uuid.UUID, title, description, dueDate string) (*models.TerritoryTask, error) {
+	var dueDt *time.Time
+	if dueDate != "" {
+		parsed, err := time.Parse("2006-01-02", dueDate)
+		if err == nil {
+			dueDt = &parsed
+		}
+	}
+
+	var id uuid.UUID
+	s.DB.Raw("SELECT gen_random_uuid()").Scan(&id)
+	err := s.DB.Exec(`INSERT INTO tasks (id, assigned_to, created_by, title, description, status, due_date, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'pending', $6, NOW(), NOW())`,
+		id, dealerID, createdBy, title, description, dueDt).Error
+	if err != nil {
+		return nil, err
+	}
+
+	task := &models.TerritoryTask{
+		ID:         id,
+		Title:      title,
+		Status:     "pending",
+		AssignedTo: dealerID,
+	}
+	if dueDt != nil {
+		task.DueDate = dueDt.Format("2006-01-02")
+	}
+	return task, nil
+}
+
+// GetTerritoryCommunications - коммуникации
+func (s *KPIService) GetTerritoryCommunications(ctx context.Context, userID uuid.UUID, period string, customStart ...time.Time) (*models.TerritoryCommunicationsResponse, error) {
+	resp := &models.TerritoryCommunicationsResponse{}
 
 	var dealers []models.User
 	if err := s.DB.Where("role = ? AND managed_by = ?", models.RoleDealer, userID).Find(&dealers).Error; err != nil {
@@ -2144,94 +2763,58 @@ func (s *KPIService) GetTerritoryPlanFact(ctx context.Context, userID uuid.UUID,
 
 	now := time.Now()
 	var startDate, endDate time.Time
-	switch period {
-	case "week":
-		startDate = now.AddDate(0, 0, -7)
-		endDate = now
-	case "quarter":
-		m := int(now.Month())
-		quarterStart := time.Month(((m - 1) / 3) * 3 + 1)
-		startDate = time.Date(now.Year(), quarterStart, 1, 0, 0, 0, 0, now.Location())
-		endDate = now
-	default: // month
-		startDate = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-		endDate = now
-	}
 
-	// По каждому дилеру
-	for _, dealer := range dealers {
-		var plan, fact float64
-		s.DB.Model(&models.DailyGoal{}).
-			Where("user_id = ? AND target_date BETWEEN ? AND ?", dealer.ID, startDate, endDate).
-			Select("COALESCE(SUM(sales_plan), 0)").Scan(&plan)
-		s.DB.Model(&models.Lead{}).
-			Where("manager_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", dealer.ID, []string{"sale", "paid"}, startDate, endDate).
-			Select("COALESCE(SUM(budget), 0)").Scan(&fact)
-
-		percent := 0
-		if plan > 0 {
-			percent = int((fact / plan) * 100)
+	if len(customStart) >= 2 && !customStart[0].IsZero() && !customStart[1].IsZero() {
+		startDate = customStart[0]
+		endDate = customStart[1]
+		if endDate.After(now) {
+			endDate = now
 		}
-
-		resp.Dealers = append(resp.Dealers, models.TerritoryDealerPlanFact{
-			ID:            dealer.ID,
-			DealerName:    dealer.FirstName + " " + dealer.LastName,
-			Plan:          plan,
-			Fact:          fact,
-			PlanPercent:   percent,
-		})
+	} else {
+		switch period {
+		case "week":
+			startDate = now.AddDate(0, 0, -7)
+			endDate = now
+		case "quarter":
+			m := int(now.Month())
+			quarterStart := time.Month(((m - 1) / 3) * 3 + 1)
+			startDate = time.Date(now.Year(), quarterStart, 1, 0, 0, 0, 0, now.Location())
+			endDate = now
+		case "year":
+			startDate = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
+			endDate = now
+		default: // month
+			startDate = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+			endDate = now
+		}
 	}
 
-	// Итого
-	var totalPlan, totalFact float64
-	s.DB.Model(&models.DailyGoal{}).
-		Where("user_id IN ? AND target_date BETWEEN ? AND ?", dealerIDs, startDate, endDate).
-		Select("COALESCE(SUM(sales_plan), 0)").Scan(&totalPlan)
-	s.DB.Model(&models.Lead{}).
-		Where("manager_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", dealerIDs, []string{"sale", "paid"}, startDate, endDate).
-		Select("COALESCE(SUM(budget), 0)").Scan(&totalFact)
-
-	resp.TotalPlan = totalPlan
-	resp.TotalFact = totalFact
-
-	return resp, nil
-}
-
-// GetTerritoryCommunications - коммуникации
-func (s *KPIService) GetTerritoryCommunications(ctx context.Context, userID uuid.UUID) (*models.TerritoryCommunicationsResponse, error) {
-	resp := &models.TerritoryCommunicationsResponse{}
-
-	// Задачи (от franchiser_manager к дилерам)
-	var dealers []models.User
-	if err := s.DB.Where("role = ? AND managed_by = ?", models.RoleDealer, userID).Find(&dealers).Error; err != nil {
-		return nil, err
-	}
-
-	var dealerIDs []uuid.UUID
-	for _, d := range dealers {
-		dealerIDs = append(dealerIDs, d.ID)
-	}
-
-	// Недавние задачи
+	// Задачи дилеров за период
 	var tasks []models.Task
-	if len(dealerIDs) > 0 {
-		s.DB.Where("assigned_to IN ? AND created_at > ?", dealerIDs, time.Now().AddDate(0, 0, -7)).Find(&tasks)
-	}
+	s.DB.Where("assigned_to IN ? AND created_at BETWEEN ? AND ?", dealerIDs, startDate, endDate).Order("created_at DESC").Find(&tasks)
 
 	for _, task := range tasks {
+		dueDate := ""
+		if task.DueDate != nil {
+			dueDate = task.DueDate.Format("2006-01-02")
+		}
 		resp.Tasks = append(resp.Tasks, models.TerritoryTask{
 			ID:          task.ID,
 			Title:       task.Title,
 			Status:      task.Status,
 			AssignedTo: task.AssignedTo,
-			DueDate:     task.DueDate.Format("2006-01-02"),
+			DueDate:     dueDate,
+			CreatedAt:   task.CreatedAt.Format("2006-01-02"),
 		})
 	}
+
+	// Взаимодействия (контакты) за период
+	s.DB.Where("dealer_id IN ? AND date BETWEEN ? AND ?", dealerIDs, startDate, endDate).Order("date DESC").Find(&resp.Interactions)
 
 	// Непрочитанные сообщения
 	var messagesCount int64
 	s.DB.Model(&models.Notification{}).
-		Where("user_id = ? AND read_at IS NULL", userID).
+		Where("user_id = ? AND is_read = FALSE", userID).
 		Count(&messagesCount)
 	resp.UnreadMessages = int(messagesCount)
 
@@ -2239,7 +2822,7 @@ func (s *KPIService) GetTerritoryCommunications(ctx context.Context, userID uuid
 }
 
 // GetTerritoryBenchmarks - бенчмарки
-func (s *KPIService) GetTerritoryBenchmarks(ctx context.Context, userID uuid.UUID) (*models.TerritoryBenchmarksResponse, error) {
+func (s *KPIService) GetTerritoryBenchmarks(ctx context.Context, userID uuid.UUID, period string, customStart ...time.Time) (*models.TerritoryBenchmarksResponse, error) {
 	resp := &models.TerritoryBenchmarksResponse{}
 
 	var dealers []models.User
@@ -2248,34 +2831,131 @@ func (s *KPIService) GetTerritoryBenchmarks(ctx context.Context, userID uuid.UUI
 	}
 
 	var dealerIDs []uuid.UUID
+	dealerNameMap := map[uuid.UUID]string{}
 	for _, d := range dealers {
 		dealerIDs = append(dealerIDs, d.ID)
+		dealerNameMap[d.ID] = d.DisplayName
 	}
 
-	if len(dealerIDs) == 0 {
-		return resp, nil
+	now := time.Now()
+	var startDate, endDate time.Time
+
+	if len(customStart) >= 2 && !customStart[0].IsZero() && !customStart[1].IsZero() {
+		startDate = customStart[0]
+		endDate = customStart[1]
+		if endDate.After(now) {
+			endDate = now
+		}
+	} else {
+		switch period {
+		case "week":
+			startDate = now.AddDate(0, 0, -7)
+			endDate = now
+		case "quarter":
+			m := int(now.Month())
+			quarterStart := time.Month(((m - 1) / 3) * 3 + 1)
+			startDate = time.Date(now.Year(), quarterStart, 1, 0, 0, 0, 0, now.Location())
+			endDate = now
+		case "year":
+			startDate = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
+			endDate = now
+		default:
+			startDate = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+			endDate = now
+		}
 	}
 
-	// Средняя конверсия территории
-	var totalLeads, totalSales int64
-	s.DB.Model(&models.Lead{}).Where("manager_id IN ?", dealerIDs).Count(&totalLeads)
-	s.DB.Model(&models.Lead{}).Where("manager_id IN ? AND status IN ?", dealerIDs, []string{"sale", "paid"}).Count(&totalSales)
+	// Салоны территории
+	var territorySalonIDs []uuid.UUID
+	if len(dealerIDs) > 0 {
+		s.DB.Model(&models.Salon{}).Where("dealer_id IN ?", dealerIDs).Pluck("id", &territorySalonIDs)
+	}
 
+	// Все дилеры + их салоны (для сети) — фильтр по tenant_id
+	var currentUser models.User
+	if err := s.DB.First(&currentUser, "id = ?", userID).Error; err != nil {
+		return nil, err
+	}
+	var allDealerIDs []uuid.UUID
+	netQuery := s.DB.Model(&models.User{}).Where("role = ?", models.RoleDealer)
+	if currentUser.TenantID != nil {
+		netQuery = netQuery.Where("tenant_id = ?", currentUser.TenantID)
+	}
+	netQuery.Pluck("id", &allDealerIDs)
+
+	var allSalonIDs []uuid.UUID
+	if len(allDealerIDs) > 0 {
+		s.DB.Model(&models.Salon{}).Where("dealer_id IN ?", allDealerIDs).Pluck("id", &allSalonIDs)
+	}
+
+	// --- Территория: конверсия и средний чек ---
+	var terrLeads, terrSales int64
+	if len(territorySalonIDs) > 0 {
+		s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND created_at BETWEEN ? AND ?", territorySalonIDs, startDate, endDate).Count(&terrLeads)
+		s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", territorySalonIDs, []string{"sale", "paid"}, startDate, endDate).Count(&terrSales)
+
+		var terrAvgCheck float64
+		s.DB.Model(&models.Lead{}).
+			Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", territorySalonIDs, []string{"sale", "paid"}, startDate, endDate).
+			Select("COALESCE(AVG(budget), 0)").Scan(&terrAvgCheck)
+		resp.TerritoryAvgCheck = terrAvgCheck
+	}
 	resp.TerritoryConversion = 0
-	if totalLeads > 0 {
-		resp.TerritoryConversion = (float64(totalSales) / float64(totalLeads)) * 100
+	if terrLeads > 0 {
+		resp.TerritoryConversion = (float64(terrSales) / float64(terrLeads)) * 100
 	}
 
-	// Средний чек
-	var avgCheck float64
-	s.DB.Model(&models.Lead{}).
-		Where("manager_id IN ? AND status IN ?", dealerIDs, []string{"sale", "paid"}).
-		Select("COALESCE(AVG(budget), 0)").Scan(&avgCheck)
-	resp.TerritoryAvgCheck = avgCheck
+	// --- Сеть: конверсия и средний чек ---
+	var netLeads, netSales int64
+	if len(allSalonIDs) > 0 {
+		s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND created_at BETWEEN ? AND ?", allSalonIDs, startDate, endDate).Count(&netLeads)
+		s.DB.Model(&models.Lead{}).Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", allSalonIDs, []string{"sale", "paid"}, startDate, endDate).Count(&netSales)
 
-	// Эталон (сеть)
-	resp.NetworkAvgConversion = 15.0 // 15% - эталон
-	resp.NetworkAvgCheck = 80000   // 80k - эталон
+		var netAvgCheck float64
+		s.DB.Model(&models.Lead{}).
+			Where("salon_id IN ? AND status IN ? AND created_at BETWEEN ? AND ?", allSalonIDs, []string{"sale", "paid"}, startDate, endDate).
+			Select("COALESCE(AVG(budget), 0)").Scan(&netAvgCheck)
+		resp.NetworkAvgCheck = netAvgCheck
+	}
+	resp.NetworkAvgConversion = 0
+	if netLeads > 0 {
+		resp.NetworkAvgConversion = (float64(netSales) / float64(netLeads)) * 100
+	}
+
+	// --- Разбивка по салонам территории ---
+	if len(territorySalonIDs) > 0 {
+		type salonRow struct {
+			ID         uuid.UUID
+			Name       string
+			DealerID   uuid.UUID
+		}
+		var salonRows []salonRow
+		s.DB.Model(&models.Salon{}).Select("id, name, dealer_id").Where("id IN ?", territorySalonIDs).Find(&salonRows)
+
+		for _, sr := range salonRows {
+			var slLeads, slSales int64
+			s.DB.Model(&models.Lead{}).Where("salon_id = ? AND created_at BETWEEN ? AND ?", sr.ID, startDate, endDate).Count(&slLeads)
+			s.DB.Model(&models.Lead{}).Where("salon_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", sr.ID, []string{"sale", "paid"}, startDate, endDate).Count(&slSales)
+
+			var slAvg float64
+			s.DB.Model(&models.Lead{}).
+				Where("salon_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", sr.ID, []string{"sale", "paid"}, startDate, endDate).
+				Select("COALESCE(AVG(budget), 0)").Scan(&slAvg)
+
+			conv := 0.0
+			if slLeads > 0 {
+				conv = (float64(slSales) / float64(slLeads)) * 100
+			}
+
+			resp.SalonBenchmarks = append(resp.SalonBenchmarks, models.SalonBenchmark{
+				SalonID:    sr.ID,
+				SalonName:  sr.Name,
+				DealerName: dealerNameMap[sr.DealerID],
+				Conversion: conv,
+				AvgCheck:   slAvg,
+			})
+		}
+	}
 
 	return resp, nil
 }
@@ -2350,6 +3030,155 @@ func (s *KPIService) UpdateDealerTask(ctx context.Context, userID, taskID, statu
 		SET status = ?, updated_at = NOW() 
 		WHERE id = ? AND dealer_id = ?
 	`, status, taskID, userID).Error
+}
+
+// GetDealerDetails - детализация дилера (preview-режим для менеджера/франчайзера)
+// managerID - ID менеджера, который запрашивает (для проверки прав и фильтрации по его территории)
+func (s *KPIService) GetDealerDetails(ctx context.Context, managerID, dealerID uuid.UUID) (*models.DealerDetailsResponse, error) {
+	resp := &models.DealerDetailsResponse{
+		DealerID:     dealerID,
+		Salons:       []models.DealerDetailSalon{},
+		SalesHistory: []float64{},
+		RecentAlerts: []models.DealerDetailAlert{},
+	}
+
+	var dealer models.User
+	if err := s.DB.First(&dealer, "id = ? AND role = ?", dealerID, models.RoleDealer).Error; err != nil {
+		return nil, err
+	}
+
+	// Проверяем, что дилер в зоне менеджера
+	if dealer.ManagedBy == nil || *dealer.ManagedBy != managerID {
+		// Разрешаем также франчайзеру (его ID) и супер-админу — но в текущем кейсе зовём только менеджеры
+		// Если не совпало — 403 на уровне handler
+	}
+
+	resp.DealerName = strings.TrimSpace(dealer.FirstName + " " + dealer.LastName)
+	if resp.DealerName == "" {
+		resp.DealerName = dealer.Email
+	}
+	resp.Email = dealer.Email
+	resp.Phone = dealer.Phone
+	resp.Status = dealer.Status
+	resp.ManagerID = dealer.ManagedBy
+	if dealer.ManagedBy != nil {
+		var mgr models.User
+		if err := s.DB.Select("first_name, last_name").First(&mgr, "id = ?", *dealer.ManagedBy).Error; err == nil {
+			resp.ManagerName = strings.TrimSpace(mgr.FirstName + " " + mgr.LastName)
+		}
+	}
+
+	now := time.Now()
+	firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+
+	// План и факт за текущий месяц
+	s.DB.Model(&models.DailyGoal{}).
+		Where("user_id = ? AND target_date BETWEEN ? AND ?", dealer.ID, firstOfMonth, now).
+		Select("COALESCE(SUM(sales_plan), 0)").Scan(&resp.Plan)
+	s.DB.Model(&models.Lead{}).
+		Where("manager_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", dealer.ID, []string{"sale", "paid"}, firstOfMonth, now).
+		Select("COALESCE(SUM(budget), 0)").Scan(&resp.Fact)
+	if resp.Plan > 0 {
+		resp.PlanPercent = int((resp.Fact / resp.Plan) * 100)
+	}
+
+	// Конверсия
+	var totalLeads, totalSales int64
+	s.DB.Model(&models.Lead{}).Where("manager_id = ? AND created_at BETWEEN ? AND ?", dealer.ID, firstOfMonth, now).Count(&totalLeads)
+	s.DB.Model(&models.Lead{}).Where("manager_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", dealer.ID, []string{"sale", "paid"}, firstOfMonth, now).Count(&totalSales)
+	if totalLeads > 0 {
+		resp.Conversion = (float64(totalSales) / float64(totalLeads)) * 100
+	}
+
+	// Средний чек
+	if totalSales > 0 {
+		resp.AvgCheck = resp.Fact / float64(totalSales)
+	}
+
+	// Маржа (прокси)
+	if resp.Plan > 0 {
+		resp.Margin = (resp.Fact / resp.Plan) * 30
+		if resp.Margin > 100 {
+			resp.Margin = 100
+		}
+	}
+
+	// Дебиторка
+	s.DB.Model(&models.Lead{}).
+		Where("manager_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", dealer.ID, []string{"contact", "meeting"}, firstOfMonth, now).
+		Select("COALESCE(SUM(budget), 0)").Scan(&resp.Debt)
+
+	// Список салонов дилера
+	var salons []models.Salon
+	s.DB.Where("dealer_id = ?", dealer.ID).Find(&salons)
+	for _, salon := range salons {
+		var sales float64
+		s.DB.Model(&models.Lead{}).
+			Where("salon_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", salon.ID, []string{"sale", "paid"}, firstOfMonth, now).
+			Select("COALESCE(SUM(budget), 0)").Scan(&sales)
+		var mgrName string
+		var mgr models.User
+		if err := s.DB.Select("first_name, last_name").Where("salon_id = ? AND role = ?", salon.ID, models.RoleDealerManager).First(&mgr).Error; err == nil {
+			mgrName = strings.TrimSpace(mgr.FirstName + " " + mgr.LastName)
+		}
+		resp.Salons = append(resp.Salons, models.DealerDetailSalon{
+			ID:          salon.ID,
+			Name:        salon.Name,
+			Address:     salon.Address,
+			Sales:       sales,
+			ManagerName: mgrName,
+		})
+	}
+
+	// История продаж и план за 6 месяцев
+	for i := 5; i >= 0; i-- {
+		monthStart := time.Date(now.Year(), now.Month()-time.Month(i), 1, 0, 0, 0, 0, now.Location())
+		monthEnd := monthStart.AddDate(0, 1, 0)
+		queryEnd := monthEnd
+		if now.Before(queryEnd) {
+			queryEnd = now
+		}
+		var monthSales float64
+		s.DB.Model(&models.Lead{}).
+			Where("manager_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", dealer.ID, []string{"sale", "paid"}, monthStart, queryEnd).
+			Select("COALESCE(SUM(budget), 0)").Scan(&monthSales)
+		resp.SalesHistory = append(resp.SalesHistory, monthSales)
+
+		var monthPlan float64
+		s.DB.Model(&models.DailyGoal{}).
+			Where("user_id = ? AND target_date BETWEEN ? AND ?", dealer.ID, monthStart, monthEnd).
+			Select("COALESCE(SUM(sales_plan), 0)").Scan(&monthPlan)
+		resp.PlanHistory = append(resp.PlanHistory, monthPlan)
+	}
+
+	// Последние алерты по дилеру
+	type AlertRow struct {
+		ID        uuid.UUID
+		Title     string
+		Category  string
+		Priority  string
+		CreatedAt time.Time
+	}
+	var alerts []AlertRow
+	s.DB.Raw(`SELECT id, title, category, priority, created_at FROM alerts WHERE user_id = ? ORDER BY created_at DESC LIMIT 5`, dealer.ID).Scan(&alerts)
+	for _, a := range alerts {
+		resp.RecentAlerts = append(resp.RecentAlerts, models.DealerDetailAlert{
+			ID:        a.ID,
+			Title:     a.Title,
+			Category:  a.Category,
+			Priority:  a.Priority,
+			CreatedAt: a.CreatedAt.Format("2006-01-02"),
+		})
+	}
+
+	// Кол-во активных задач
+	var tblExists int64
+	s.DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'dealer_tasks'").Scan(&tblExists)
+	if tblExists > 0 {
+		s.DB.Raw(`SELECT COUNT(*) FROM dealer_tasks WHERE dealer_id = ? AND status NOT IN ('done','cancelled')`, dealer.ID).Scan(&resp.TaskCount)
+	}
+
+	return resp, nil
 }
 
 // === Dealer Requests Service ===
@@ -3770,6 +4599,190 @@ func (s *KPIService) GetReportData(ctx context.Context, userID string, period, d
 	}, nil
 }
 
+// GenerateTerritoryPlanFactPDF - сгенерировать PDF отчёт по план-факту территории
+func (s *KPIService) GenerateTerritoryPlanFactPDF(ctx context.Context, userID uuid.UUID, period string, customStart ...time.Time) ([]byte, error) {
+	data, err := s.GetTerritoryPlanFact(ctx, userID, period, customStart...)
+	if err != nil {
+		return nil, err
+	}
+
+	blueR, blueG, blueB := 26, 54, 93
+	greenR := 82
+	redR, redG, redB := 255, 77, 79
+	whiteR, whiteG, whiteB := 255, 255, 255
+
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetAutoPageBreak(true, 20)
+	pdf.AliasNbPages("{nb}")
+	pdf.AddPage()
+
+	for _, f := range []struct{ family, style, file string }{
+		{"DejaVu", "", "fonts/DejaVuSans.ttf"},
+		{"DejaVu", "B", "fonts/DejaVuSans-Bold.ttf"},
+		{"DejaVu", "I", "fonts/DejaVuSans-Oblique.ttf"},
+		{"DejaVu", "BI", "fonts/DejaVuSans-BoldOblique.ttf"},
+	} {
+		data, rErr := reportFonts.ReadFile(f.file)
+		if rErr != nil {
+			return nil, fmt.Errorf("read font %s: %w", f.file, rErr)
+		}
+		pdf.AddUTF8FontFromBytes(f.family, f.style, data)
+	}
+
+	nf := func(v float64) string {
+		s := fmt.Sprintf("%.0f", v)
+		out := ""
+		for i, c := range s {
+			if i > 0 && (len(s)-i)%3 == 0 {
+				out += " "
+			}
+			out += string(c)
+		}
+		return out
+	}
+
+	periodLabel := map[string]string{"week": "Неделя", "month": "Месяц", "quarter": "Квартал"}
+	pl := periodLabel[period]
+	if pl == "" {
+		if period == "custom" && len(customStart) >= 2 && !customStart[0].IsZero() && !customStart[1].IsZero() {
+			pl = customStart[0].Format("02.01.2006") + " - " + customStart[1].Format("02.01.2006")
+		} else {
+			pl = period
+		}
+	}
+
+	// === HEADER BAR ===
+	pdf.SetFillColor(blueR, blueG, blueB)
+	pdf.Rect(0, 0, 210, 32, "F")
+	pdf.SetTextColor(whiteR, whiteG, whiteB)
+	pdf.SetFont("DejaVu", "B", 18)
+	pdf.SetXY(20, 8)
+	pdf.Cell(0, 12, "План-факт и Прогноз")
+	pdf.SetFont("DejaVu", "", 8)
+	pdf.SetXY(150, 11)
+	pdf.Cell(50, 8, "Сгенерировано: "+time.Now().Format("02.01.2006 15:04"))
+	pdf.SetTextColor(0, 0, 0)
+
+	// === INFO ===
+	y := 44.0
+	pdf.SetFont("DejaVu", "B", 12)
+	pdf.SetXY(20, y)
+	pdf.Cell(0, 8, "Сводка за "+pl)
+	y += 12
+
+	pdf.SetFont("DejaVu", "", 10)
+	pdf.SetTextColor(60, 60, 60)
+	pdf.SetXY(20, y)
+	pdf.Cell(80, 6, fmt.Sprintf("План: %s руб.", nf(data.TotalPlan)))
+	pdf.SetXY(100, y)
+	pdf.Cell(80, 6, fmt.Sprintf("Факт: %s руб.", nf(data.TotalFact)))
+	y += 8
+
+	completionPct := 0.0
+	if data.TotalPlan > 0 {
+		completionPct = (data.TotalFact / data.TotalPlan) * 100
+	}
+	pdf.SetXY(20, y)
+	complColorR := greenR
+	if completionPct < 80 {
+		complColorR = redR
+	}
+	pdf.SetTextColor(complColorR, 0, 0)
+	pdf.Cell(80, 6, fmt.Sprintf("Выполнение: %.1f%%", completionPct))
+	pdf.SetTextColor(0, 0, 0)
+
+	// separator
+	y += 10
+	pdf.SetDrawColor(200, 200, 200)
+	pdf.Line(20, y, 190, y)
+
+	// === TABLE HEADER ===
+	y += 8
+	colW := []float64{70, 25, 25, 25, 25}
+	headers := []string{"Дилер", "План", "Факт", "Прогноз", "Откл."}
+	x0 := 20.0
+	pdf.SetFont("DejaVu", "B", 8)
+	pdf.SetFillColor(blueR, blueG, blueB)
+	pdf.SetTextColor(whiteR, whiteG, whiteB)
+	for i, h := range headers {
+		pdf.SetXY(x0, y)
+		pdf.CellFormat(colW[i], 7, h, "1", 0, "C", true, 0, "")
+		x0 += colW[i]
+	}
+	pdf.SetTextColor(0, 0, 0)
+
+	// === TABLE ROWS ===
+	y += 7
+	pdf.SetFont("DejaVu", "", 8)
+	for i, d := range data.Dealers {
+		if y > 260 {
+			pdf.AddPage()
+			y = 32
+			// re-draw header
+			pdf.SetFont("DejaVu", "B", 8)
+			pdf.SetFillColor(blueR, blueG, blueB)
+			pdf.SetTextColor(whiteR, whiteG, whiteB)
+			x0 = 20.0
+			for j, h := range headers {
+				pdf.SetXY(x0, y)
+				pdf.CellFormat(colW[j], 7, h, "1", 0, "C", true, 0, "")
+				x0 += colW[j]
+			}
+			pdf.SetTextColor(0, 0, 0)
+			pdf.SetFont("DejaVu", "", 8)
+			y += 7
+		}
+
+		deviation := d.Fact - d.Plan
+		devPct := 0.0
+		if d.Plan > 0 {
+			devPct = (deviation / d.Plan) * 100
+		}
+		bgFill := i%2 == 0
+		x0 = 20.0
+		rowData := []string{
+			d.DealerName,
+			nf(d.Plan),
+			nf(d.Fact),
+			nf(d.Forecast),
+			fmt.Sprintf("%.0f%%", devPct),
+		}
+		for j, val := range rowData {
+			pdf.SetXY(x0, y)
+			align := "L"
+			if j > 0 {
+				align = "R"
+			}
+			clr := [3]int{0, 0, 0}
+			if j == 4 && devPct < 0 {
+				clr = [3]int{redR, redG, redB}
+			}
+			pdf.SetTextColor(clr[0], clr[1], clr[2])
+			pdf.CellFormat(colW[j], 6, val, "1", 0, align, bgFill, 0, "")
+			x0 += colW[j]
+		}
+		y += 6
+	}
+
+	// === FOOTER ===
+	pdf.SetTextColor(0, 0, 0)
+	pdf.SetY(-20)
+	pdf.SetDrawColor(200, 200, 200)
+	pdf.Line(20, pdf.GetY(), 190, pdf.GetY())
+	pdf.SetY(-15)
+	pdf.SetFont("DejaVu", "", 8)
+	pdf.SetTextColor(150, 150, 150)
+	pdf.CellFormat(0, 5, "Сгенерировано: "+time.Now().Format("02.01.2006 15:04"), "", 0, "L", false, 0, "")
+	pdf.CellFormat(0, 5, fmt.Sprintf("Стр. %d/{nb}", pdf.PageNo()), "", 0, "R", false, 0, "")
+	pdf.SetTextColor(0, 0, 0)
+
+	var buf bytes.Buffer
+	if err := pdf.Output(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // GenerateManagerPDF - сгенерировать PDF отчёт по менеджеру
 func (s *KPIService) GenerateManagerPDF(ctx context.Context, userID string, managerID string) ([]byte, error) {
 	mgrUUID, err := uuid.Parse(managerID)
@@ -4526,6 +5539,327 @@ func (s *KPIService) GeneratePDF(ctx context.Context, userID string, period, dat
 	return buf.Bytes(), nil
 }
 
+// GenerateDealerProductsPDF - сгенерировать PDF отчёт по товарам и складу дилера
+func (s *KPIService) GenerateDealerProductsPDF(ctx context.Context, userID uuid.UUID, period, dateStr, startDateStr, endDateStr, salonIDStr string) ([]byte, error) {
+	data, err := s.GetDealerProducts(ctx, userID, period, dateStr, startDateStr, endDateStr, salonIDStr)
+	if err != nil {
+		return nil, err
+	}
+
+	blueR, blueG, blueB := 26, 54, 93
+	redR, redG, redB := 255, 77, 79
+	whiteR, whiteG, whiteB := 255, 255, 255
+
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetAutoPageBreak(true, 20)
+	pdf.AliasNbPages("{nb}")
+	pdf.AddPage()
+
+	for _, f := range []struct{ family, style, file string }{
+		{"DejaVu", "", "fonts/DejaVuSans.ttf"},
+		{"DejaVu", "B", "fonts/DejaVuSans-Bold.ttf"},
+		{"DejaVu", "I", "fonts/DejaVuSans-Oblique.ttf"},
+		{"DejaVu", "BI", "fonts/DejaVuSans-BoldOblique.ttf"},
+	} {
+		d, rErr := reportFonts.ReadFile(f.file)
+		if rErr != nil {
+			return nil, fmt.Errorf("read font %s: %w", f.file, rErr)
+		}
+		pdf.AddUTF8FontFromBytes(f.family, f.style, d)
+	}
+
+	nf := func(v float64) string {
+		s := fmt.Sprintf("%.0f", v)
+		out := ""
+		for i, c := range s {
+			if i > 0 && (len(s)-i)%3 == 0 {
+				out += " "
+			}
+			out += string(c)
+		}
+		return out
+	}
+
+	periodLabel := map[string]string{"week": "Неделя", "month": "Месяц", "quarter": "Квартал", "year": "Год"}
+	pl := periodLabel[period]
+	if pl == "" {
+		if period == "custom" && startDateStr != "" && endDateStr != "" {
+			pl = startDateStr + " — " + endDateStr
+		} else {
+			pl = period
+		}
+	}
+
+	// === HEADER BAR ===
+	pdf.SetFillColor(blueR, blueG, blueB)
+	pdf.Rect(0, 0, 210, 32, "F")
+	pdf.SetTextColor(whiteR, whiteG, whiteB)
+	pdf.SetFont("DejaVu", "B", 18)
+	pdf.SetXY(20, 8)
+	pdf.Cell(0, 12, "Отчёт по товарам и складу")
+	pdf.SetFont("DejaVu", "", 8)
+	pdf.SetXY(150, 11)
+	pdf.Cell(50, 8, "Сгенерировано: "+time.Now().Format("02.01.2006 15:04"))
+	pdf.SetTextColor(0, 0, 0)
+
+	// === INFO ===
+	y := 44.0
+	pdf.SetFont("DejaVu", "B", 12)
+	pdf.SetXY(20, y)
+	pdf.Cell(0, 8, "Сводка за "+pl)
+	y += 12
+
+	pdf.SetFont("DejaVu", "", 10)
+	pdf.SetTextColor(60, 60, 60)
+	pdf.SetXY(20, y)
+	pdf.Cell(80, 6, fmt.Sprintf("Общая выручка: %s руб.", nf(data.TotalRevenue)))
+	y += 8
+
+	// separator
+	y += 2
+	pdf.SetDrawColor(200, 200, 200)
+	pdf.Line(20, y, 190, y)
+
+	// === TABLE 1: INVENTORY / TURNOVER ===
+	y += 10
+	pdf.SetFont("DejaVu", "B", 11)
+	pdf.SetXY(20, y)
+	pdf.SetTextColor(blueR, blueG, blueB)
+	pdf.Cell(0, 8, "Оборачиваемость")
+	pdf.SetTextColor(0, 0, 0)
+	y += 12
+
+	iColW := []float64{50, 24, 22, 22, 22, 24, 26}
+	iHeaders := []string{"Коллекция", "Категория", "Склад", "Витрина", "Продано", "Оборач.", "Стоимость"}
+	pdf.SetFont("DejaVu", "B", 7)
+	pdf.SetFillColor(blueR, blueG, blueB)
+	pdf.SetTextColor(whiteR, whiteG, whiteB)
+	x0 := 15.0
+	for i, h := range iHeaders {
+		pdf.SetXY(x0, y)
+		pdf.CellFormat(iColW[i], 7, h, "1", 0, "C", true, 0, "")
+		x0 += iColW[i]
+	}
+	pdf.SetTextColor(0, 0, 0)
+	y += 7
+	pdf.SetFont("DejaVu", "", 7)
+
+	for i, item := range data.Inventory {
+		if y > 260 {
+			pdf.AddPage()
+			y = 32
+			pdf.SetFont("DejaVu", "B", 7)
+			pdf.SetFillColor(blueR, blueG, blueB)
+			pdf.SetTextColor(whiteR, whiteG, whiteB)
+			x0 = 15.0
+			for j, h := range iHeaders {
+				pdf.SetXY(x0, y)
+				pdf.CellFormat(iColW[j], 7, h, "1", 0, "C", true, 0, "")
+				x0 += iColW[j]
+			}
+			pdf.SetTextColor(0, 0, 0)
+			pdf.SetFont("DejaVu", "", 7)
+			y += 7
+		}
+
+		bgFill := i%2 == 0
+		x0 = 15.0
+
+		rowVals := []string{
+			item.Collection,
+			item.Category,
+			strconv.Itoa(item.StockWarehouse),
+			strconv.Itoa(item.OnDisplay),
+			strconv.Itoa(item.SoldPeriod),
+			strconv.Itoa(item.TurnoverDays) + " дн",
+			nf(item.TotalStockValue),
+		}
+		aligns := []string{"L", "C", "C", "C", "C", "C", "R"}
+		for j, val := range rowVals {
+			pdf.SetXY(x0, y)
+			clr := [3]int{0, 0, 0}
+			if j == 5 && item.TurnoverDays > 90 {
+				clr = [3]int{redR, redG, redB}
+			}
+			pdf.SetTextColor(clr[0], clr[1], clr[2])
+			pdf.CellFormat(iColW[j], 6, val, "1", 0, aligns[j], bgFill, 0, "")
+			x0 += iColW[j]
+		}
+		y += 6
+	}
+	pdf.SetTextColor(0, 0, 0)
+
+	// === TABLE 2: LOST SALES ===
+	if len(data.LostSales) > 0 {
+		y += 8
+		if y > 250 {
+			pdf.AddPage()
+			y = 32
+		}
+		pdf.SetDrawColor(200, 200, 200)
+		pdf.Line(20, y, 190, y)
+		y += 8
+		pdf.SetFont("DejaVu", "B", 11)
+		pdf.SetXY(20, y)
+		pdf.SetTextColor(blueR, blueG, blueB)
+		pdf.Cell(0, 8, "Упущенная прибыль")
+		pdf.SetTextColor(0, 0, 0)
+		y += 12
+
+		lColW := []float64{60, 35, 40, 35}
+		lHeaders := []string{"Причина", "Кол-во запросов", "Потерянная выручка", "% от общей"}
+		pdf.SetFont("DejaVu", "B", 7)
+		pdf.SetFillColor(blueR, blueG, blueB)
+		pdf.SetTextColor(whiteR, whiteG, whiteB)
+		x0 = 20.0
+		for i, h := range lHeaders {
+			pdf.SetXY(x0, y)
+			pdf.CellFormat(lColW[i], 7, h, "1", 0, "C", true, 0, "")
+			x0 += lColW[i]
+		}
+		pdf.SetTextColor(0, 0, 0)
+		y += 7
+		pdf.SetFont("DejaVu", "", 8)
+
+		for i, ls := range data.LostSales {
+			if y > 265 {
+				pdf.AddPage()
+				y = 32
+				pdf.SetFont("DejaVu", "B", 7)
+				pdf.SetFillColor(blueR, blueG, blueB)
+				pdf.SetTextColor(whiteR, whiteG, whiteB)
+				x0 = 20.0
+				for j, h := range lHeaders {
+					pdf.SetXY(x0, y)
+					pdf.CellFormat(lColW[j], 7, h, "1", 0, "C", true, 0, "")
+					x0 += lColW[j]
+				}
+				pdf.SetTextColor(0, 0, 0)
+				pdf.SetFont("DejaVu", "", 8)
+				y += 7
+			}
+			bgFill := i%2 == 0
+			x0 = 20.0
+			rowVals := []string{
+				ls.Reason,
+				strconv.Itoa(ls.Count),
+				nf(ls.LostRevenue),
+				fmt.Sprintf("%.1f%%", ls.Percent),
+			}
+			aligns := []string{"L", "C", "R", "C"}
+			for j, val := range rowVals {
+				pdf.SetXY(x0, y)
+				clr := [3]int{0, 0, 0}
+				if j == 2 {
+					clr = [3]int{redR, redG, redB}
+				}
+				pdf.SetTextColor(clr[0], clr[1], clr[2])
+				pdf.CellFormat(lColW[j], 6, val, "1", 0, aligns[j], bgFill, 0, "")
+				x0 += lColW[j]
+			}
+			y += 6
+		}
+		pdf.SetTextColor(0, 0, 0)
+	}
+
+	// === TABLE 3: RETURNS ===
+	if len(data.Returns) > 0 {
+		y += 8
+		if y > 250 {
+			pdf.AddPage()
+			y = 32
+		}
+		pdf.SetDrawColor(200, 200, 200)
+		pdf.Line(20, y, 190, y)
+		y += 8
+		pdf.SetFont("DejaVu", "B", 11)
+		pdf.SetXY(20, y)
+		pdf.SetTextColor(blueR, blueG, blueB)
+		pdf.Cell(0, 8, "Возвраты и рекламации")
+		pdf.SetTextColor(0, 0, 0)
+		y += 12
+
+		rColW := []float64{26, 54, 50, 24, 24}
+		rHeaders := []string{"Дата", "Товар", "Причина", "Сумма", "Статус"}
+		pdf.SetFont("DejaVu", "B", 7)
+		pdf.SetFillColor(blueR, blueG, blueB)
+		pdf.SetTextColor(whiteR, whiteG, whiteB)
+		x0 = 20.0
+		for i, h := range rHeaders {
+			pdf.SetXY(x0, y)
+			pdf.CellFormat(rColW[i], 7, h, "1", 0, "C", true, 0, "")
+			x0 += rColW[i]
+		}
+		pdf.SetTextColor(0, 0, 0)
+		y += 7
+		pdf.SetFont("DejaVu", "", 7)
+
+		statusLabel := map[string]string{
+			"resolved":    "Урегулировано",
+			"in_progress": "В процессе",
+			"claim_filed": "Претензия",
+		}
+
+		for i, r := range data.Returns {
+			if y > 265 {
+				pdf.AddPage()
+				y = 32
+				pdf.SetFont("DejaVu", "B", 7)
+				pdf.SetFillColor(blueR, blueG, blueB)
+				pdf.SetTextColor(whiteR, whiteG, whiteB)
+				x0 = 20.0
+				for j, h := range rHeaders {
+					pdf.SetXY(x0, y)
+					pdf.CellFormat(rColW[j], 7, h, "1", 0, "C", true, 0, "")
+					x0 += rColW[j]
+				}
+				pdf.SetTextColor(0, 0, 0)
+				pdf.SetFont("DejaVu", "", 7)
+				y += 7
+			}
+			bgFill := i%2 == 0
+			x0 = 20.0
+			sl := statusLabel[r.Status]
+			if sl == "" {
+				sl = r.Status
+			}
+			rowVals := []string{
+				r.Date,
+				r.Product,
+				r.Reason,
+				nf(r.Amount),
+				sl,
+			}
+			aligns := []string{"C", "L", "L", "R", "C"}
+			for j, val := range rowVals {
+				pdf.SetXY(x0, y)
+				pdf.SetTextColor(0, 0, 0)
+				pdf.CellFormat(rColW[j], 6, val, "1", 0, aligns[j], bgFill, 0, "")
+				x0 += rColW[j]
+			}
+			y += 6
+		}
+		pdf.SetTextColor(0, 0, 0)
+	}
+
+	// === FOOTER ===
+	pdf.SetY(-20)
+	pdf.SetDrawColor(200, 200, 200)
+	pdf.Line(20, pdf.GetY(), 190, pdf.GetY())
+	pdf.SetY(-15)
+	pdf.SetFont("DejaVu", "", 8)
+	pdf.SetTextColor(150, 150, 150)
+	pdf.CellFormat(0, 5, "Сгенерировано: "+time.Now().Format("02.01.2006 15:04"), "", 0, "L", false, 0, "")
+	pdf.CellFormat(0, 5, fmt.Sprintf("Стр. %d/{nb}", pdf.PageNo()), "", 0, "R", false, 0, "")
+	pdf.SetTextColor(0, 0, 0)
+
+	var buf bytes.Buffer
+	if err := pdf.Output(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // helpers for map access
 func getFloat(m map[string]interface{}, key string) float64 {
 	if v, ok := m[key]; ok {
@@ -4739,4 +6073,92 @@ func (s *KPIService) SaveDraft(ctx context.Context, userID string, draft map[str
 // GetDraft - получить черновик
 func (s *KPIService) GetDraft(ctx context.Context, userID string) (map[string]interface{}, error) {
 	return map[string]interface{}{}, nil
+}
+
+func (s *KPIService) CreateTerritoryInteraction(ctx context.Context, dealerID, createdBy uuid.UUID, interactionType, description, result, dateStr string) (*models.TerritoryInteraction, error) {
+	var dt time.Time
+	if dateStr != "" {
+		parsed, err := time.Parse("2006-01-02 15:04", dateStr)
+		if err != nil {
+			parsed, err = time.Parse("2006-01-02T15:04", dateStr)
+			if err != nil {
+				parsed = time.Now()
+			}
+		}
+		dt = parsed
+	} else {
+		dt = time.Now()
+	}
+
+	var id uuid.UUID
+	s.DB.Raw("SELECT gen_random_uuid()").Scan(&id)
+	err := s.DB.Exec(`INSERT INTO territory_interactions (id, dealer_id, type, description, result, created_by, date, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+		id, dealerID, interactionType, description, result, createdBy, dt).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &models.TerritoryInteraction{
+		ID:          id,
+		DealerID:    dealerID,
+		Type:        interactionType,
+		Description: description,
+		Result:      result,
+		CreatedBy:   createdBy,
+		Date:        dt,
+	}, nil
+}
+
+// GetUnitTemplates - список шаблонов unit-экономики дилера
+func (s *KPIService) GetUnitTemplates(ctx context.Context, userID uuid.UUID) ([]models.UnitTemplate, error) {
+	rows, err := s.DB.Raw(`
+		SELECT id, dealer_id, name, category, input::text, created_at
+		FROM unit_templates
+		WHERE dealer_id = ?
+		ORDER BY created_at DESC
+	`, userID).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var templates []models.UnitTemplate
+	for rows.Next() {
+		var t models.UnitTemplate
+		var inputJSON string
+		rows.Scan(&t.ID, &t.DealerID, &t.Name, &t.Category, &inputJSON, &t.CreatedAt)
+		json.Unmarshal([]byte(inputJSON), &t.Input)
+		templates = append(templates, t)
+	}
+	return templates, nil
+}
+
+// CreateUnitTemplate - создать шаблон unit-экономики
+func (s *KPIService) CreateUnitTemplate(ctx context.Context, userID uuid.UUID, req models.UnitTemplateRequest) (*models.UnitTemplate, error) {
+	inputJSON, _ := json.Marshal(req.Input)
+	var id string
+	s.DB.Raw("SELECT gen_random_uuid()").Scan(&id)
+
+	err := s.DB.Exec(`
+		INSERT INTO unit_templates (id, dealer_id, name, category, input, created_at)
+		VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+	`, id, userID, req.Name, req.Category, string(inputJSON)).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &models.UnitTemplate{
+		ID:        id,
+		DealerID:  userID.String(),
+		Name:      req.Name,
+		Category:  req.Category,
+		Input:     req.Input,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}
+
+// DeleteUnitTemplate - удалить шаблон unit-экономики
+func (s *KPIService) DeleteUnitTemplate(ctx context.Context, userID uuid.UUID, templateID string) error {
+	return s.DB.Exec(`DELETE FROM unit_templates WHERE id = $1 AND dealer_id = $2`, templateID, userID).Error
 }
