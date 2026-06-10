@@ -251,6 +251,40 @@ func ResetAndSeedData(db *gorm.DB) error {
 		}
 	}
 
+	// 4b. Create promotions for each dealer
+	log.Println("Creating promotions...")
+	promotionTemplates := []struct {
+		Name      string
+		Condition string
+		Min, Max  int
+	}{
+		{"Летняя распродажа", "При покупке дивана — кресло в подарок", 10, 25},
+		{"Комплект со скидкой", "Мебель + услуги дизайнера", 15, 30},
+		{"Акция выходного дня", "Скидка 20% в субботу и воскресенье", 20, 20},
+		{"Новоселье", "Скидка 10% при заказе от 200 000 ₽", 10, 15},
+		{"Сезонное предложение", "Кухни со скидкой до 35%", 20, 35},
+		{"Счастливый час", "Скидка 15% с 10 до 12 часов", 15, 15},
+	}
+	promoCount := 0
+	for _, d := range dealers {
+		numPromos := 2 + rng.Intn(3)
+		shuffled := make([]int, len(promotionTemplates))
+		for i := range shuffled {
+			shuffled[i] = i
+		}
+		rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+		for i := 0; i < numPromos && i < len(shuffled); i++ {
+			t := promotionTemplates[shuffled[i]]
+			startDate := time.Now().AddDate(0, -1, 0)
+			endDate := startDate.AddDate(0, 2, 0)
+			db.Exec(`INSERT INTO promotions (id, tenant_id, dealer_id, name, condition, discount_min, discount_max, start_date, end_date, is_active)
+				VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, true)`,
+				franchiser.TenantID, d.ID, t.Name, t.Condition, t.Min, t.Max, startDate, endDate)
+			promoCount++
+		}
+	}
+	log.Printf("Promotions created: %d", promoCount)
+
 	// 5. Create 9 salons (1 per dealer)
 	type salonInfo struct {
 		ID       string
@@ -341,6 +375,24 @@ func ResetAndSeedData(db *gorm.DB) error {
 			goalCount++
 		}
 	}
+	// Goals for salon managers (from DB)
+	var smUsers []struct {
+		ID       string
+		Email    string
+	}
+	db.Table("users").Where("role = 'salon_manager'").Select("id, email").Scan(&smUsers)
+	for _, sm := range smUsers {
+		basePlan := 500000.0 + rng.Float64()*300000.0
+		for m := start; m.Before(end); m = m.AddDate(0, 1, 0) {
+			plan := roundVal(basePlan * (0.8 + rng.Float64()*0.4))
+			fact := roundVal(plan * (0.7 + rng.Float64()*0.4))
+			dateStr := m.Format("2006-01-02")
+			db.Exec(`INSERT INTO goals (id, assignee_id, role, sales_plan, sales_fact, target_date, status, period, tenant_id, assigner_id)
+				VALUES ($1, $2, $3, $4, $5, $6, 'active', 'month', $7, $8)`,
+				uuid.New().String(), sm.ID, "salon_manager", plan, fact, dateStr, franchiser.TenantID, franchiser.ID)
+			goalCount++
+		}
+	}
 	log.Printf("Goals created: %d", goalCount)
 
 	// 8. Create orders for each salon (Jan 2025 - current)
@@ -362,6 +414,17 @@ func ResetAndSeedData(db *gorm.DB) error {
 		{"Матрас «Дуо»", "Матрасы"},
 	}
 
+	extraServices := []struct {
+		collection string
+		category   string
+	}{
+		{"Дизайн-проект", "Услуги"},
+		{"Доставка и сборка", "Услуги"},
+		{"Гардеробная система", "Допы"},
+		{"Освещение для кухни", "Допы"},
+		{"Фартук из скинали", "Допы"},
+	}
+
 	orderCount := 0
 	for _, s := range salons {
 		var smIDs []string
@@ -377,16 +440,71 @@ func ResetAndSeedData(db *gorm.DB) error {
 				price := roundVal(15000.0 + rng.Float64()*135000.0)
 				day := 1 + rng.Intn(28)
 				orderTime := time.Date(m.Year(), m.Month(), day, 10+rng.Intn(12), 0, 0, 0, time.UTC)
-				prod := orderProducts[rng.Intn(len(orderProducts))]
 
-				db.Exec(`INSERT INTO orders (id, salon_id, created_by, status, total_price, description, created_at, updated_at)
-					VALUES ($1, $2, $3, 'paid', $4, $5, $6, $6)`,
-					uuid.New().String(), s.ID, createdBy, price, prod.collection, orderTime)
+				isExtra := rng.Float32() < 0.15
+				var prod struct{ collection, category string }
+				if isExtra {
+					prod = extraServices[rng.Intn(len(extraServices))]
+					price = roundVal(3000.0 + rng.Float64()*27000.0)
+				} else {
+					prod = orderProducts[rng.Intn(len(orderProducts))]
+				}
+
+				db.Exec(`INSERT INTO orders (id, salon_id, created_by, status, total_price, description, is_extra, created_at, updated_at)
+					VALUES ($1, $2, $3, 'paid', $4, $5, $6, $7, $7)`,
+					uuid.New().String(), s.ID, createdBy, price, prod.collection, isExtra, orderTime)
 				orderCount++
 			}
 		}
 	}
 	log.Printf("Orders created: %d", orderCount)
+
+	// 8b. Create contracts for each salon (derived from sale-leads for prepayments/margin)
+	log.Println("Seeding contracts...")
+	contractCount := 0
+	for _, s := range salons {
+		var mgrIDs []string
+		db.Table("users").Where("salon_id = ? AND role = 'salon_manager'", s.ID).Select("id").Scan(&mgrIDs)
+		if len(mgrIDs) == 0 {
+			continue
+		}
+
+		// Create 2-4 contracts per month per salon
+		for m := start; m.Before(end); m = m.AddDate(0, 1, 0) {
+			numContracts := 2 + rng.Intn(3)
+			for c := 0; c < numContracts; c++ {
+				managerID := mgrIDs[rng.Intn(len(mgrIDs))]
+				day := 1 + rng.Intn(28)
+				contractTime := time.Date(m.Year(), m.Month(), day, 10+rng.Intn(12), 0, 0, 0, time.UTC)
+
+				totalAmount := roundVal(50000.0 + rng.Float64()*200000.0)
+				prepaidPercent := 20 + rng.Intn(60)
+				prepaidAmount := roundVal(totalAmount * float64(prepaidPercent) / 100.0)
+				margin := 20.0 + rng.Float64()*15.0
+				remain := totalAmount - prepaidAmount
+
+				paymentDate := contractTime.AddDate(0, 0, 14+rng.Intn(30))
+				status := "paid"
+				paymentStatus := "paid"
+				if rng.Float32() < 0.3 {
+					status = "pending"
+					paymentStatus = "awaiting_payment"
+				}
+
+				db.Exec(`INSERT INTO contracts
+					(id, salon_id, manager_id, client_name, client_phone,
+					 total_amount, prepaid_amount, paid_amount, remain_amount, margin_percent,
+					 status, payment_status, payment_date, products, created_at, updated_at)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)`,
+					uuid.New().String(), s.ID, managerID,
+					fmt.Sprintf("Клиент %s #%d", s.Name, c+1), "+7 (999) "+fmt.Sprintf("%03d-%02d-%02d", rng.Intn(999), rng.Intn(99), rng.Intn(99)),
+					totalAmount, prepaidAmount, prepaidAmount, remain, margin,
+					status, paymentStatus, paymentDate, "Мебель", contractTime)
+				contractCount++
+			}
+		}
+	}
+	log.Printf("Contracts created: %d", contractCount)
 
 	// 9. Create daily_goals for each dealer (daily granularity)
 	dgCount := 0
@@ -660,6 +778,73 @@ func ResetAndSeedData(db *gorm.DB) error {
 
 	log.Printf("Leads created: %d", leadCount)
 
+	// Распределяем причины потери по зависшим лидам (>60 дней)
+	db.Exec(`
+		UPDATE leads SET
+			interest_product = CASE ((EXTRACT(EPOCH FROM created_at)::int) % 12)
+				WHEN 0 THEN 'Кухня «Классика»'
+				WHEN 1 THEN 'Диван «Престиж»'
+				WHEN 2 THEN 'Матрас «Ортопед»'
+				WHEN 3 THEN 'Кухня «Лофт»'
+				WHEN 4 THEN 'Шкаф «Гармония»'
+				WHEN 5 THEN 'Стол «Стиль»'
+				WHEN 6 THEN 'Диван «Комфорт»'
+				WHEN 7 THEN 'Матрас «Дуо»'
+				WHEN 8 THEN 'Кухня «Модерн»'
+				WHEN 9 THEN 'Кресло «Эко»'
+				WHEN 10 THEN 'Стенка «Практик»'
+				WHEN 11 THEN 'Матрас «Релакс»'
+			END,
+			disqualify_reason = CASE
+				WHEN RANDOM() < 0.30 THEN 'Нет в наличии'
+				WHEN RANDOM() < 0.55 THEN 'Не устроила цена'
+				WHEN RANDOM() < 0.75 THEN 'Долгий срок производства'
+				WHEN RANDOM() < 0.90 THEN 'Не подошёл дизайн'
+				ELSE 'Другое'
+			END
+		WHERE status NOT IN ('sale', 'paid')
+			AND created_at < NOW() - INTERVAL '60 days'
+			AND (disqualify_reason IS NULL OR disqualify_reason = '')
+			AND (interest_product IS NULL OR interest_product = '')
+	`)
+	var lostUpdated int64
+	db.Table("leads").Where("disqualify_reason IS NOT NULL AND disqualify_reason != ''").Count(&lostUpdated)
+	log.Printf("Lost sales reasons assigned: %d", lostUpdated)
+
+	// Создаём возвраты для каждого дилера (по 10 шт)
+	log.Println("Creating dealer return requests...")
+	db.Exec(`
+		WITH numbered AS (
+			SELECT u.id AS dealer_id, g AS idx,
+				ROW_NUMBER() OVER (ORDER BY u.id, g) - 1 AS rn
+			FROM users u
+			CROSS JOIN generate_series(1, 10) g
+			WHERE u.role = 'dealer'
+				AND NOT EXISTS (SELECT 1 FROM dealer_requests dr WHERE dr.dealer_id = u.id AND dr.type = 'return' LIMIT 1)
+		)
+		INSERT INTO dealer_requests (id, dealer_id, type, description, amount, status, reason, created_at, updated_at)
+		SELECT
+			gen_random_uuid(),
+			n.dealer_id,
+			'return',
+			(ARRAY['Кухня «Классика»','Диван «Престиж»','Матрас «Ортопед»','Кухня «Лофт»','Шкаф «Гармония»','Стол «Стиль»','Диван «Комфорт»','Матрас «Дуо»','Кухня «Модерн»','Кресло «Эко»','Стенка «Практик»','Матрас «Релакс»'])[1 + (n.rn % 12)],
+			(RANDOM() * 150000 + 30000)::numeric(15,2),
+			(ARRAY['approved','approved','approved','approved','pending','pending','pending','rejected','rejected'])[1 + (RANDOM() * 8)::int],
+			CASE
+				WHEN RANDOM() < 0.30 THEN 'Брак производства'
+				WHEN RANDOM() < 0.55 THEN 'Повреждение при доставке'
+				WHEN RANDOM() < 0.75 THEN 'Несоответствие заказу'
+				WHEN RANDOM() < 0.90 THEN 'Гарантийный случай'
+				ELSE 'Другое'
+			END,
+			NOW() - (RANDOM() * INTERVAL '180 days'),
+			NOW() - (RANDOM() * INTERVAL '180 days')
+		FROM numbered n
+	`)
+	var returnCount int64
+	db.Table("dealer_requests").Where("type = 'return'").Count(&returnCount)
+	log.Printf("Dealer return requests created: %d", returnCount)
+
 	// 12. Create dealer_expenses for all months (Jan 2025 – current) for each dealer
 	log.Println("Creating dealer expenses for all months...")
 	expenseCount := 0
@@ -690,9 +875,20 @@ func ResetAndSeedData(db *gorm.DB) error {
 				if amount == 0 {
 					continue
 				}
-				db.Exec(`INSERT INTO dealer_expenses (dealer_id, period, category, amount)
-					VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-					d.ID, period, cat, amount)
+			expenseDesc := cat
+			if cat == "marketing" {
+				expenseDescs := []string{
+					"Реклама в соцсетях",
+					"Печатные материалы",
+					"Продвижение на сайте",
+					"Сувенирная продукция",
+					"Участие в выставке",
+				}
+				expenseDesc = expenseDescs[rng.Intn(len(expenseDescs))]
+			}
+			db.Exec(`INSERT INTO dealer_expenses (dealer_id, period, category, amount, description)
+				VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+				d.ID, period, cat, amount, expenseDesc)
 				expenseCount++
 			}
 		}
@@ -781,7 +977,57 @@ func ResetAndSeedData(db *gorm.DB) error {
 	}
 	log.Printf("Tasks created: %d", taskCount)
 
-	// 15. Seed product_inventory for each salon
+	// 15. Seed dealer_tasks (brand → dealer tasks visible in communications tab)
+	log.Println("Creating dealer_tasks...")
+	dealerTaskCount := 0
+	dealerTaskTemplates := []struct {
+		title       string
+		description string
+		status      string
+		priority    string
+		daysAgo     int
+		dueDaysDiff int
+	}{
+		{"Обновить каталог", "Разместить новые позиции из весенней коллекции", "new", "high", 0, 5},
+		{"Сдать отчёт по продажам", "Подготовить сводку за прошлый месяц", "in_progress", "medium", 3, 7},
+		{"Проверить остатки на складе", "Сверить остатки с учётной системой", "done", "medium", 10, -2},
+		{"Утвердить рекламный бюджет", "Согласовать расходы на продвижение", "overdue", "high", 20, -5},
+		{"Обновить витрину", "Обновить выкладку согласно планограмме", "new", "low", 1, 10},
+	}
+	for _, d := range dealers {
+		for _, tmpl := range dealerTaskTemplates {
+			createdAt := now.AddDate(0, 0, -tmpl.daysAgo)
+			dueDate := createdAt.AddDate(0, 0, tmpl.dueDaysDiff)
+			db.Exec(`INSERT INTO dealer_tasks (id, dealer_id, assigned_by, title, description, status, priority, due_date, created_at, updated_at)
+				VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $8)`,
+				d.ID, d.ManagerID, tmpl.title, tmpl.description, tmpl.status, tmpl.priority, dueDate, createdAt)
+			dealerTaskCount++
+		}
+	}
+	log.Printf("Dealer tasks created: %d", dealerTaskCount)
+
+	// 16. Seed territory_interactions for each dealer
+	log.Println("Creating territory interactions...")
+	interactionTypes := []string{"call", "meeting", "email", "task", "discount"}
+	interactionDesc := []string{"Обсуждение плана продаж", "Проверка работы салона", "Направлен прайс-лист", "Согласование условий", "Консультация по ассортименту"}
+	interactionResults := []string{"Договорились о встрече", "Замечания устранены", "Документы отправлены", "Скидка согласована", "Рекомендации даны"}
+	intCount := 0
+	for _, d := range dealers {
+		for i := 0; i < 3; i++ {
+			daysAgo := rng.Intn(60)
+			createdAt := now.AddDate(0, 0, -daysAgo)
+			ti := rng.Intn(len(interactionTypes))
+			td := rng.Intn(len(interactionDesc))
+			tr := rng.Intn(len(interactionResults))
+			db.Exec(`INSERT INTO territory_interactions (id, dealer_id, type, description, result, created_by, created_at, date)
+				VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $6)`,
+				d.ID, interactionTypes[ti], interactionDesc[td], interactionResults[tr], d.ManagerID, createdAt)
+			intCount++
+		}
+	}
+	log.Printf("Territory interactions created: %d", intCount)
+
+	// 17. Seed product_inventory for each salon
 	log.Println("Seeding product inventory...")
 	invCount := 0
 	for _, s := range salons {

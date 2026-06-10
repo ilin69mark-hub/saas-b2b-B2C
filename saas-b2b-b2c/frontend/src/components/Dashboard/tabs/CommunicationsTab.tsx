@@ -6,6 +6,7 @@ import {
   FileTextOutlined,
   BellOutlined,
 } from '@ant-design/icons';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 import dayjs from 'dayjs';
 import apiClient from '@/api/axiosClient';
 
@@ -50,7 +51,7 @@ interface BudgetItem {
 interface Interaction {
   id: string;
   date: string;
-  type: 'call' | 'meeting' | 'email' | 'approval';
+  type: string;
   summary: string;
   result: string;
   managerName: string;
@@ -63,8 +64,36 @@ interface MarketingBudget {
   items: BudgetItem[];
 }
 
+const DONUT_COLORS = ['#1890ff', '#52c41a', '#fa8c16', '#ff4d4f', '#722ed1', '#13c2c2', '#d9d9d9'];
+
+const taskStatusLabels: Record<TaskStatus, string> = {
+  new: 'Новые',
+  in_progress: 'В работе',
+  done: 'Готово',
+  overdue: 'Просрочено',
+};
+
+const taskPriorityLabels: Record<TaskPriority, string> = {
+  high: 'Высокий',
+  medium: 'Средний',
+  low: 'Низкий',
+};
+
+const requestStatusLabels: Record<RequestStatus, string> = {
+  pending: 'На рассмотрении',
+  approved: 'Согласовано',
+  rejected: 'Отклонено',
+  needs_clarification: 'Требуется уточнение',
+};
+
+const requestTypeLabels: Record<RequestType, string> = {
+  discount: 'Скидка',
+  return: 'Возврат/брак',
+  marketing: 'Маркетинг',
+  other: 'Другое',
+};
+
 const CommunicationsTab: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'tasks' | 'requests' | 'budget' | 'history'>('tasks');
   const [requestModalOpen, setRequestModalOpen] = useState(false);
   const [commentModalOpen, setCommentModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -79,21 +108,39 @@ const CommunicationsTab: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [requests, setRequests] = useState<Request[]>([]);
   const [marketingBudget, setMarketingBudget] = useState<MarketingBudget | undefined>(undefined);
-  const [interactions] = useState<Interaction[]>([]);
+  const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchAll = async () => {
       setLoading(true);
       try {
-        const [tasksRes, requestsRes, budgetRes] = await Promise.all([
+        const [tasksRes, requestsRes, budgetRes, interactionsRes] = await Promise.all([
           apiClient.get('/dealer/tasks'),
           apiClient.get('/dealer/requests'),
           apiClient.get('/dealer/marketing-budget'),
+          apiClient.get('/dealer/interactions'),
         ]);
         setTasks(tasksRes.data?.tasks || []);
-        setRequests(requestsRes.data?.requests || []);
-        setMarketingBudget(budgetRes.data || undefined);
+        setRequests((requestsRes.data?.requests || []).map((r: any) => ({
+          id: r.id,
+          type: r.type,
+          description: r.description,
+          sentDate: r.created_at ? dayjs(r.created_at).format('DD.MM.YYYY') : '',
+          status: r.status,
+          manager: '',
+          amount: r.amount ?? 0,
+        })));
+        const b = budgetRes.data;
+        setMarketingBudget(b ? { total: b.total_amount, used: b.used_amount, remaining: b.remaining, items: b.items || [] } : undefined);
+        setInteractions((interactionsRes.data || []).map((i: any) => ({
+          id: i.id,
+          date: i.date,
+          type: i.type,
+          summary: i.summary,
+          result: i.result,
+          managerName: i.manager_name || '',
+        })));
       } catch (e) {
         console.error('Failed to fetch communications data', e);
       } finally {
@@ -227,6 +274,54 @@ const CommunicationsTab: React.FC = () => {
     });
   }, [tasks, filterStatus, filterPriority]);
 
+  const tasksByStatus = useMemo(() => {
+    const map = new Map<TaskStatus, number>();
+    for (const t of tasks) {
+      const status = t.status === 'overdue' ? 'overdue' : t.status === 'done' ? 'done' : t.status;
+      map.set(status, (map.get(status) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([status, count]) => ({
+      name: taskStatusLabels[status] || status,
+      value: count,
+    }));
+  }, [tasks]);
+
+  const tasksByPriority = useMemo(() => {
+    const map = new Map<TaskPriority, number>();
+    for (const t of tasks) {
+      map.set(t.priority, (map.get(t.priority) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([priority, count]) => ({
+      name: taskPriorityLabels[priority] || priority,
+      value: count,
+    }));
+  }, [tasks]);
+
+  const requestsByStatus = useMemo(() => {
+    const map = new Map<RequestStatus, number>();
+    for (const r of requests) {
+      map.set(r.status, (map.get(r.status) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([status, count]) => ({
+      name: requestStatusLabels[status] || status,
+      value: count,
+    }));
+  }, [requests]);
+
+  const requestsByType = useMemo(() => {
+    const map = new Map<RequestType, number>();
+    for (const r of requests) {
+      map.set(r.type, (map.get(r.type) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([type, count]) => ({
+      name: requestTypeLabels[type] || type,
+      value: count,
+    }));
+  }, [requests]);
+
+  const overdueCount = useMemo(() => tasks.filter(t => t.status === 'overdue').length, [tasks]);
+  const pendingRequests = useMemo(() => requests.filter(r => r.status === 'pending').length, [requests]);
+
   const tasksTableColumns = [
     {
       title: 'Задача',
@@ -342,13 +437,14 @@ const CommunicationsTab: React.FC = () => {
       key: 'status',
       width: 150,
       render: (val: RequestStatus) => {
-        const statusMap: Record<RequestStatus, { color: string; text: string }> = {
+        const statusMap: Record<string, { color: string; text: string }> = {
           pending: { color: 'blue', text: 'На рассмотрении' },
           approved: { color: 'green', text: 'Согласовано' },
           rejected: { color: 'red', text: 'Отклонено' },
           needs_clarification: { color: 'orange', text: 'Требуется уточнение' },
         };
-        return <Tag color={statusMap[val].color}>{statusMap[val].text}</Tag>;
+        const s = statusMap[val] || { color: 'default', text: val };
+        return <Tag color={s.color}>{s.text}</Tag>;
       },
     },
     {
@@ -359,20 +455,21 @@ const CommunicationsTab: React.FC = () => {
     },
   ];
 
-  const budgetPercent = marketingBudget ? Math.round((marketingBudget.used / marketingBudget.total) * 100) : 0;
+  const budgetPercent = marketingBudget ? Math.round((marketingBudget.used / marketingBudget.total) * 100) || 0 : 0;
 
   const budgetTableColumns = [
     { title: 'Дата', dataIndex: 'date', key: 'date', width: 100 },
     { title: 'Назначение', dataIndex: 'purpose', key: 'purpose', width: 200 },
     { title: 'Сумма', dataIndex: 'amount', key: 'amount', render: (val: number) => <Text>{val.toLocaleString()} ₽</Text> },
-    { title: 'Статус', dataIndex: 'status', key: 'status', width: 120, render: (val: string) => <Tag color={val === 'approved' ? 'green' : val === 'pending' ? 'orange' : 'red'}>{val}</Tag> },
+    { title: 'Статус', dataIndex: 'status', key: 'status', width: 120, render: (val: string) => { const m: Record<string, string> = { approved: 'Согласовано', pending: 'Ожидает', rejected: 'Отклонено' }; return <Tag color={val === 'approved' ? 'green' : val === 'pending' ? 'orange' : 'red'}>{m[val] || val}</Tag>; } },
   ];
 
   const interactionColumns = [
     { title: 'Дата', dataIndex: 'date', key: 'date', width: 100 },
-    { title: 'Тип', dataIndex: 'type', key: 'type', width: 100, render: (val: string) => <Tag>{val}</Tag> },
+    { title: 'Тип', dataIndex: 'type', key: 'type', width: 100, render: (val: string) => { const m: Record<string, string> = { call: 'Звонок', meeting: 'Встреча', email: 'Письмо', task: 'Задача', discount: 'Согласование' }; return <Tag>{m[val] || val}</Tag>; } },
     { title: 'Содержание', dataIndex: 'summary', key: 'summary', width: 200 },
     { title: 'Результат', dataIndex: 'result', key: 'result', width: 150 },
+    { title: 'Менеджер', dataIndex: 'managerName', key: 'managerName', width: 130 },
   ];
 
   if (loading) {
@@ -386,46 +483,50 @@ const CommunicationsTab: React.FC = () => {
   return (
     <div>
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={6}>
+          <Card size="small" style={{ textAlign: 'center' }}>
+            <Statistic title="Всего задач" value={tasks.length} valueStyle={{ fontSize: 14 }} />
+          </Card>
+        </Col>
+        <Col xs={6}>
+          <Card size="small" style={{ textAlign: 'center' }}>
+            <Statistic title="Просрочено" value={overdueCount} valueStyle={{ fontSize: 14, color: overdueCount > 0 ? '#ff4d4f' : '#52c41a' }} />
+          </Card>
+        </Col>
+        <Col xs={6}>
+          <Card size="small" style={{ textAlign: 'center' }}>
+            <Statistic title="Запросов на рассмотрении" value={pendingRequests} valueStyle={{ fontSize: 14, color: pendingRequests > 0 ? '#fa8c16' : undefined }} />
+          </Card>
+        </Col>
+        <Col xs={6}>
+          <Card size="small" style={{ textAlign: 'center' }}>
+            <Statistic title="В сети" prefix={wsConnected ? <Badge status="success" /> : <Badge status="error" />} value={wsConnected ? 'Online' : 'Offline'} valueStyle={{ fontSize: 14 }} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24}>
           <Space>
-            <Button type={activeTab === 'tasks' ? 'primary' : 'default'} onClick={() => setActiveTab('tasks')}>
-              Задачи от бренда
-              {wsConnected ? <Badge status="success" /> : <Badge status="error" />}
-            </Button>
-            <Button type={activeTab === 'requests' ? 'primary' : 'default'} onClick={() => setActiveTab('requests')}>
-              Мои запросы
-            </Button>
-            <Button type={activeTab === 'budget' ? 'primary' : 'default'} onClick={() => setActiveTab('budget')}>
-              Маркетинговый бюджет
-            </Button>
-            <Button type={activeTab === 'history' ? 'primary' : 'default'} onClick={() => setActiveTab('history')}>
-              История взаимодействий
-            </Button>
+            <Select value={filterStatus} onChange={setFilterStatus} style={{ width: 150 }}>
+              <Option value="all">Все статусы</Option>
+              <Option value="new">Новые</Option>
+              <Option value="in_progress">В работе</Option>
+              <Option value="done">Готово</Option>
+              <Option value="overdue">Просроченные</Option>
+            </Select>
+            <Select value={filterPriority} onChange={setFilterPriority} style={{ width: 150 }}>
+              <Option value="all">Все приоритеты</Option>
+              <Option value="high">Высокий</Option>
+              <Option value="medium">Средний</Option>
+              <Option value="low">Низкий</Option>
+            </Select>
           </Space>
         </Col>
       </Row>
 
-      {activeTab === 'tasks' && (
-        <>
-          <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-            <Col xs={24}>
-              <Space>
-                <Select value={filterStatus} onChange={setFilterStatus} style={{ width: 150 }}>
-                  <Option value="all">Все статусы</Option>
-                  <Option value="new">Новые</Option>
-                  <Option value="in_progress">В работе</Option>
-                  <Option value="done">Готово</Option>
-                  <Option value="overdue">Просроченные</Option>
-                </Select>
-                <Select value={filterPriority} onChange={setFilterPriority} style={{ width: 150 }}>
-                  <Option value="all">Все приоритеты</Option>
-                  <Option value="high">Высокий</Option>
-                  <Option value="medium">Средний</Option>
-                  <Option value="low">Низкий</Option>
-                </Select>
-              </Space>
-            </Col>
-          </Row>
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={24}>
           <Card title="📋 Задачи от франчайзера">
             {filteredTasks.length > 0 ? (
               <Table dataSource={filteredTasks} columns={tasksTableColumns} rowKey="id" pagination={{ pageSize: 10 }} scroll={{ x: 800 }} />
@@ -433,12 +534,53 @@ const CommunicationsTab: React.FC = () => {
               <Empty description="Нет задач" />
             )}
           </Card>
-        </>
-      )}
+        </Col>
+      </Row>
 
-      {activeTab === 'requests' && (
-        <>
-          <Card 
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={24} md={12}>
+          <Card title="🍩 Задачи по статусам">
+            {tasksByStatus.length > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <ResponsiveContainer width="100%" height={280}>
+                  <PieChart>
+                    <Pie data={tasksByStatus} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={3}>
+                      {tasksByStatus.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                    </Pie>
+                    <RechartsTooltip formatter={(value: number, name: string) => [`${value} шт.`, name]} />
+                    <Legend verticalAlign="bottom" height={30} formatter={(value: string) => <span style={{ fontSize: 13 }}>{value}</span>} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <Empty description="Нет данных" />
+            )}
+          </Card>
+        </Col>
+        <Col xs={24} md={12}>
+          <Card title="🍩 Задачи по приоритетам">
+            {tasksByPriority.length > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <ResponsiveContainer width="100%" height={280}>
+                  <PieChart>
+                    <Pie data={tasksByPriority} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={3}>
+                      {tasksByPriority.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                    </Pie>
+                    <RechartsTooltip formatter={(value: number, name: string) => [`${value} шт.`, name]} />
+                    <Legend verticalAlign="bottom" height={30} formatter={(value: string) => <span style={{ fontSize: 13 }}>{value}</span>} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <Empty description="Нет данных" />
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={24}>
+          <Card
             title="📨 Мои запросы к бренду"
             extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setRequestModalOpen(true)}>Создать запрос</Button>}
           >
@@ -448,83 +590,123 @@ const CommunicationsTab: React.FC = () => {
               <Empty description="Нет запросов" />
             )}
           </Card>
+        </Col>
+      </Row>
 
-          <Modal
-            title="Создать запрос"
-            open={requestModalOpen}
-            onCancel={() => setRequestModalOpen(false)}
-            onOk={handleCreateRequest}
-          >
-            <Form form={form} layout="vertical">
-              <Form.Item name="type" label="Тип запроса" rules={[{ required: true }]}>
-                <Select>
-                  <Option value="discount">Согласование скидки</Option>
-                  <Option value="return">Возврат/брак</Option>
-                  <Option value="marketing">Маркетинговая поддержка</Option>
-                  <Option value="other">Другое</Option>
-                </Select>
-              </Form.Item>
-              <Form.Item name="amount" label="Сумма (для скидки/возврата)">
-                <InputNumber style={{ width: '100%' }} min={0} placeholder="0 ₽" />
-              </Form.Item>
-              <Form.Item name="description" label="Описание" rules={[{ required: true }]}>
-                <TextArea rows={4} placeholder="Опишите ваш запрос..." />
-              </Form.Item>
-              <Form.Item name="file" label="Прикрепить файл">
-                <Button icon={<FileTextOutlined />}>Выбрать файл</Button>
-              </Form.Item>
-            </Form>
-          </Modal>
-        </>
-      )}
-
-      {activeTab === 'budget' && (
-        <>
-          <Row gutter={[16, 16]}>
-            <Col xs={24} lg={12}>
-              <Card title="💰 Маркетинговый бюджет">
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  <Row gutter={16}>
-                    <Col span={8}>
-                      <Statistic title="Выделено" value={marketingBudget?.total || 0} prefix="₽ " />
-                    </Col>
-                    <Col span={8}>
-                      <Statistic title="Использовано" value={marketingBudget?.used || 0} prefix="₽ " valueStyle={{ color: '#fa8c16' }} />
-                    </Col>
-                    <Col span={8}>
-                      <Statistic title="Остаток" value={marketingBudget?.remaining || 0} prefix="₽ " valueStyle={{ color: '#52c41a' }} />
-                    </Col>
-                  </Row>
-                  <Progress 
-                    percent={budgetPercent} 
-                    status={budgetPercent > 90 ? 'exception' : budgetPercent === 100 ? 'success' : undefined}
-                    strokeColor={budgetPercent > 90 ? '#ff4d4f' : '#1890ff'}
-                  />
-                </Space>
-              </Card>
-            </Col>
-          </Row>
-          <Card title="Детализация трат" style={{ marginTop: 16 }}>
-            {marketingBudget?.items?.length ? (
-              <Table dataSource={marketingBudget.items} columns={budgetTableColumns} rowKey="id" pagination={{ pageSize: 5 }} />
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={24} md={12}>
+          <Card title="🍩 Запросы по статусам">
+            {requestsByStatus.length > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <ResponsiveContainer width="100%" height={280}>
+                  <PieChart>
+                    <Pie data={requestsByStatus} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={3}>
+                      {requestsByStatus.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                    </Pie>
+                    <RechartsTooltip formatter={(value: number, name: string) => [`${value} шт.`, name]} />
+                    <Legend verticalAlign="bottom" height={30} formatter={(value: string) => <span style={{ fontSize: 13 }}>{value}</span>} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
             ) : (
-              <Empty description="Нет данных о тратах" />
+              <Empty description="Нет данных" />
             )}
           </Card>
-        </>
-      )}
+        </Col>
+        <Col xs={24} md={12}>
+          <Card title="🍩 Запросы по типам">
+            {requestsByType.length > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <ResponsiveContainer width="100%" height={280}>
+                  <PieChart>
+                    <Pie data={requestsByType} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={3}>
+                      {requestsByType.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                    </Pie>
+                    <RechartsTooltip formatter={(value: number, name: string) => [`${value} шт.`, name]} />
+                    <Legend verticalAlign="bottom" height={30} formatter={(value: string) => <span style={{ fontSize: 13 }}>{value}</span>} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <Empty description="Нет данных" />
+            )}
+          </Card>
+        </Col>
+      </Row>
 
-      {activeTab === 'history' && (
-        <>
-          <Card title="📜 История взаимодействий" extra={<Button icon={<PlusOutlined />}>Добавить запись</Button>}>
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={24}>
+          <Card title="💰 Маркетинговый бюджет">
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Statistic title="Выделено" value={marketingBudget?.total || 0} prefix="₽ " />
+                </Col>
+                <Col span={8}>
+                  <Statistic title="Использовано" value={marketingBudget?.used || 0} prefix="₽ " valueStyle={{ color: '#fa8c16' }} />
+                </Col>
+                <Col span={8}>
+                  <Statistic title="Остаток" value={marketingBudget?.remaining || 0} prefix="₽ " valueStyle={{ color: '#52c41a' }} />
+                </Col>
+              </Row>
+              <Progress
+                percent={budgetPercent}
+                status={budgetPercent > 90 ? 'exception' : budgetPercent === 100 ? 'success' : undefined}
+                strokeColor={budgetPercent > 90 ? '#ff4d4f' : '#1890ff'}
+              />
+            </Space>
+          </Card>
+        </Col>
+      </Row>
+
+      {marketingBudget?.items?.length ? (
+        <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+          <Col xs={24}>
+            <Card title="Детализация трат">
+              <Table dataSource={marketingBudget.items} columns={budgetTableColumns} rowKey="id" pagination={{ pageSize: 5 }} />
+            </Card>
+          </Col>
+        </Row>
+      ) : null}
+
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={24}>
+          <Card title="📜 История взаимодействий">
             {interactions.length > 0 ? (
-              <Table dataSource={interactions} columns={interactionColumns} rowKey="id" pagination={{ pageSize: 10 }} />
+              <Table dataSource={interactions} columns={interactionColumns} rowKey="id" pagination={{ pageSize: 10 }} scroll={{ x: 700 }} />
             ) : (
               <Empty description="Нет взаимодействий" />
             )}
           </Card>
-        </>
-      )}
+        </Col>
+      </Row>
+
+      <Modal
+        title="Создать запрос"
+        open={requestModalOpen}
+        onCancel={() => setRequestModalOpen(false)}
+        onOk={handleCreateRequest}
+      >
+        <Form form={form} layout="vertical">
+          <Form.Item name="type" label="Тип запроса" rules={[{ required: true }]}>
+            <Select>
+              <Option value="discount">Согласование скидки</Option>
+              <Option value="return">Возврат/брак</Option>
+              <Option value="marketing">Маркетинговая поддержка</Option>
+              <Option value="other">Другое</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="amount" label="Сумма (для скидки/возврата)">
+            <InputNumber style={{ width: '100%' }} min={0} placeholder="0 ₽" />
+          </Form.Item>
+          <Form.Item name="description" label="Описание" rules={[{ required: true }]}>
+            <TextArea rows={4} placeholder="Опишите ваш запрос..." />
+          </Form.Item>
+          <Form.Item name="file" label="Прикрепить файл">
+            <Button icon={<FileTextOutlined />}>Выбрать файл</Button>
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title={`Комментарий к задаче: ${selectedTask?.title}`}

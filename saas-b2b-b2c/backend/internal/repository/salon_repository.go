@@ -24,9 +24,22 @@ func (r *SalonRepository) CreateSalon(ctx context.Context, salon *models.Salon) 
 // GetSalonsByTenant получает все салоны сети
 func (r *SalonRepository) GetSalonsByTenant(ctx context.Context, tenantID uuid.UUID) ([]models.Salon, error) {
 	var salons []models.Salon
-	// Убрали Preload, чтобы избежать ошибки 500
 	err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Find(&salons).Error
-	return salons, err
+	if err != nil {
+		return nil, err
+	}
+	// Загружаем менеджера для каждого салона (пользователь с ролью salon_manager и salon_id = салон)
+	for i := range salons {
+		var manager models.User
+		r.db.WithContext(ctx).
+			Where("salon_id = ? AND role = ?", salons[i].ID, models.RoleDealerManager).
+			Order("created_at ASC").
+			First(&manager)
+		if manager.ID != uuid.Nil {
+			salons[i].Manager = &manager
+		}
+	}
+	return salons, nil
 }
 
 // UpdateUserSalon назначает пользователя на салон

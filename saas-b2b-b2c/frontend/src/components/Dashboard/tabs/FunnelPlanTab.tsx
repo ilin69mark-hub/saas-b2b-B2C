@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Card, Row, Col, Progress, Typography, Table, Tag, Button, Space, Select, Radio, Collapse, Statistic, Empty, Spin, Alert, DatePicker } from 'antd';
-import { TrophyOutlined, WarningOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Card, Row, Col, Progress, Typography, Table, Tag, Button, Space, Select, Radio, Collapse, Statistic, Empty, Spin, Alert, DatePicker, Modal, InputNumber, message } from 'antd';
+import { TrophyOutlined, WarningOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import apiClient from '@/api/axiosClient';
 import dayjs, { Dayjs } from 'dayjs';
@@ -31,6 +31,7 @@ interface ManagerStats {
   id: string;
   name: string;
   salon: string;
+  salon_id: string;
   revenue: number;
   planPercent: number;
   conversion: number;
@@ -52,6 +53,14 @@ const FunnelPlanTab: React.FC = () => {
   const [period, setPeriod] = useState<PeriodType>('month');
   const [customDateRange, setCustomDateRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [expandedSalon, setExpandedSalon] = useState<string | null>(null);
+
+  const [planModal, setPlanModal] = useState<{ open: boolean; salonId: string; salonName: string }>({ open: false, salonId: '', salonName: '' });
+  const [selectedManager, setSelectedManager] = useState<string>('');
+  const [salesPlan, setSalesPlan] = useState<number>(0);
+  const [targetConversion, setTargetConversion] = useState<number>(30);
+  const [targetExtrasPercent, setTargetExtrasPercent] = useState<number>(15);
+  const [maxBonus, setMaxBonus] = useState<number>(50000);
+  const [saving, setSaving] = useState(false);
 
   const fetchData = useCallback(async (p: PeriodType, startDate?: string, endDate?: string) => {
     setLoading(true);
@@ -118,6 +127,55 @@ const FunnelPlanTab: React.FC = () => {
   const getForecastIcon = (forecast: 'green' | 'yellow' | 'red') => {
     const icons = { green: '🟢', yellow: '🟡', red: '🔴' };
     return icons[forecast];
+  };
+
+  const salonManagers = useMemo(() => {
+    return managerStats.filter((m) => m.salon_id === planModal.salonId);
+  }, [managerStats, planModal.salonId]);
+
+  const openPlanModal = (salonId: string, salonName: string) => {
+    setPlanModal({ open: true, salonId, salonName });
+    setSelectedManager('');
+    setSalesPlan(0);
+    setTargetConversion(30);
+    setTargetExtrasPercent(15);
+    const mgrs = managerStats.filter((m) => m.salon_id === salonId);
+    const existingPlan = mgrs.length > 0 ? Math.max(...mgrs.map((m) => m.planPercent)) : 0;
+    setMaxBonus(50000);
+  };
+
+  const handleSavePlan = async () => {
+    if (!selectedManager) {
+      message.warning('Выберите менеджера');
+      return;
+    }
+    if (salesPlan <= 0) {
+      message.warning('План продаж должен быть больше 0');
+      return;
+    }
+    setSaving(true);
+    try {
+      const targetDate = dayjs().startOf('month').format('YYYY-MM-DD');
+      await apiClient.put('/goals/upsert', {
+        assignee_id: selectedManager,
+        role: 'salon_manager',
+        sales_plan: salesPlan,
+        target_conversion: targetConversion,
+        target_extras_percent: targetExtrasPercent,
+        max_bonus: maxBonus,
+        period: 'month',
+        target_date: targetDate,
+      });
+      message.success('План сохранён');
+      setPlanModal({ open: false, salonId: '', salonName: '' });
+      fetchData(period === 'custom' && customDateRange?.[0] && customDateRange?.[1] ? 'custom' : period,
+        period === 'custom' ? customDateRange![0].format('YYYY-MM-DD') : undefined,
+        period === 'custom' ? customDateRange![1].format('YYYY-MM-DD') : undefined);
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || 'Ошибка сохранения плана');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const salonColumns = [
@@ -339,23 +397,37 @@ const FunnelPlanTab: React.FC = () => {
                     </Space>
                   ),
                   children: (
-                    <Row gutter={[16, 8]}>
-                      <Col xs={24} sm={8}>
-                        <Text type="secondary">Менеджер:</Text>
-                        <br />
-                        <Text strong>{salon.managerName}</Text>
-                      </Col>
-                      <Col xs={24} sm={8}>
-                        <Text type="secondary">Кол-во менеджеров:</Text>
-                        <br />
-                        <Text strong>{salon.managersCount}</Text>
-                      </Col>
-                      <Col xs={24} sm={8}>
-                        <Text type="secondary">Средний чек:</Text>
-                        <br />
-                        <Text strong>{salon.avgCheck.toLocaleString()} ₽</Text>
-                      </Col>
-                    </Row>
+                    <div>
+                      <Row gutter={[16, 8]}>
+                        <Col xs={24} sm={8}>
+                          <Text type="secondary">Менеджер:</Text>
+                          <br />
+                          <Text strong>{salon.managerName}</Text>
+                        </Col>
+                        <Col xs={24} sm={8}>
+                          <Text type="secondary">Кол-во менеджеров:</Text>
+                          <br />
+                          <Text strong>{salon.managersCount}</Text>
+                        </Col>
+                        <Col xs={24} sm={8}>
+                          <Text type="secondary">Средний чек:</Text>
+                          <br />
+                          <Text strong>{salon.avgCheck.toLocaleString()} ₽</Text>
+                        </Col>
+                      </Row>
+                      <Row style={{ marginTop: 12 }}>
+                        <Col>
+                          <Button
+                            type="primary"
+                            icon={<SettingOutlined />}
+                            size="small"
+                            onClick={() => openPlanModal(salon.id, salon.name)}
+                          >
+                            Назначить план
+                          </Button>
+                        </Col>
+                      </Row>
+                    </div>
                   ),
                 }))}
               />
@@ -437,6 +509,70 @@ const FunnelPlanTab: React.FC = () => {
           </Card>
         </Col>
       </Row>
+
+      <Modal
+        title={`Назначить план — ${planModal.salonName}`}
+        open={planModal.open}
+        onCancel={() => setPlanModal({ open: false, salonId: '', salonName: '' })}
+        onOk={handleSavePlan}
+        confirmLoading={saving}
+        okText="Сохранить"
+        cancelText="Отмена"
+        width={520}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <div>
+            <Text strong>Менеджер</Text>
+            <Select
+              style={{ width: '100%', marginTop: 4 }}
+              placeholder="Выберите менеджера"
+              value={selectedManager || undefined}
+              onChange={setSelectedManager}
+              options={salonManagers.map((m) => ({ label: m.name, value: m.id }))}
+            />
+          </div>
+          <div>
+            <Text strong>План продаж (₽)</Text>
+            <InputNumber
+              style={{ width: '100%', marginTop: 4 }}
+              min={0}
+              step={10000}
+              value={salesPlan}
+              onChange={(v) => setSalesPlan(v || 0)}
+            />
+          </div>
+          <div>
+            <Text strong>Целевая конверсия (%)</Text>
+            <InputNumber
+              style={{ width: '100%', marginTop: 4 }}
+              min={0}
+              max={100}
+              value={targetConversion}
+              onChange={(v) => setTargetConversion(v || 0)}
+            />
+          </div>
+          <div>
+            <Text strong>Целевая доля допов (%)</Text>
+            <InputNumber
+              style={{ width: '100%', marginTop: 4 }}
+              min={0}
+              max={100}
+              value={targetExtrasPercent}
+              onChange={(v) => setTargetExtrasPercent(v || 0)}
+            />
+          </div>
+          <div>
+            <Text strong>Максимум премии (₽)</Text>
+            <InputNumber
+              style={{ width: '100%', marginTop: 4 }}
+              min={0}
+              step={5000}
+              value={maxBonus}
+              onChange={(v) => setMaxBonus(v || 0)}
+            />
+          </div>
+        </Space>
+      </Modal>
     </div>
   );
 };

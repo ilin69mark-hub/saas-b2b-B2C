@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Card, Row, Col, Table, Tag, Select, Typography, Statistic, Space, Button, Empty, Spin, Radio, Tooltip, Alert, message, DatePicker } from 'antd';
 import { DownloadOutlined, ClockCircleOutlined, ReloadOutlined } from '@ant-design/icons';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
 import apiClient from '@/api/axiosClient';
 import dayjs, { Dayjs } from 'dayjs';
 
@@ -30,6 +30,13 @@ interface LostSalesReason {
   percent: number;
 }
 
+interface LostSalesCategory {
+  category: string;
+  count: number;
+  lostRevenue: number;
+  percent: number;
+}
+
 interface ReturnItem {
   id: string;
   date: string;
@@ -39,16 +46,35 @@ interface ReturnItem {
   status: 'resolved' | 'in_progress' | 'claim_filed';
 }
 
+interface ReturnsCategory {
+  category: string;
+  count: number;
+  amount: number;
+  percent: number;
+}
+
+interface ReturnsReason {
+  reason: string;
+  count: number;
+  amount: number;
+  percent: number;
+}
+
 interface SalesDynamics {
   month: string;
   sales: number;
   stock: number;
 }
 
+const LOST_SALES_COLORS = ['#ff4d4f', '#fa8c16', '#faad14', '#722ed1', '#13c2c2', '#d9d9d9'];
+
 const ProductsStockTab: React.FC = () => {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [lostSales, setLostSales] = useState<LostSalesReason[]>([]);
+  const [lostSalesByCategory, setLostSalesByCategory] = useState<LostSalesCategory[]>([]);
   const [returns, setReturns] = useState<ReturnItem[]>([]);
+  const [returnsByCategory, setReturnsByCategory] = useState<ReturnsCategory[]>([]);
+  const [returnsByReason, setReturnsByReason] = useState<ReturnsReason[]>([]);
   const [salesDynamics, setSalesDynamics] = useState<SalesDynamics[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -89,6 +115,12 @@ const ProductsStockTab: React.FC = () => {
         lostRevenue: item.lost_revenue ?? 0,
         percent: item.percent ?? 0,
       })));
+      setLostSalesByCategory((data.lost_sales_by_category || []).map((item: any) => ({
+        category: item.category,
+        count: item.count,
+        lostRevenue: item.lost_revenue ?? 0,
+        percent: item.percent ?? 0,
+      })));
       setReturns((data.returns || []).map((item: any) => ({
         id: item.id,
         date: item.date,
@@ -96,6 +128,18 @@ const ProductsStockTab: React.FC = () => {
         reason: item.reason || '',
         amount: item.amount ?? 0,
         status: item.status,
+      })));
+      setReturnsByCategory((data.returns_by_category || []).map((item: any) => ({
+        category: item.category,
+        count: item.count,
+        amount: item.amount ?? 0,
+        percent: item.percent ?? 0,
+      })));
+      setReturnsByReason((data.returns_by_reason || []).map((item: any) => ({
+        reason: item.reason,
+        count: item.count,
+        amount: item.amount ?? 0,
+        percent: item.percent ?? 0,
       })));
       setSalesDynamics((data.sales_dynamics || []).map((item: any) => ({
         month: item.month,
@@ -211,13 +255,15 @@ const ProductsStockTab: React.FC = () => {
       dataIndex: 'reason',
       key: 'reason',
       width: 150,
+      align: 'center' as const,
       render: (val: string) => {
         const colors: Record<string, string> = {
           'Нет в наличии': 'red',
-          'Долгий срок': 'orange',
-          'Цена': 'gold',
-          'Дизайн': 'purple',
+          'Не устроила цена': 'gold',
+          'Долгий срок производства': 'orange',
+          'Не подошёл дизайн': 'purple',
           'Другое': 'default',
+          'Зависший лид': 'cyan',
         };
         return <Tag color={colors[val] || 'default'}>{val}</Tag>;
       },
@@ -227,20 +273,23 @@ const ProductsStockTab: React.FC = () => {
       dataIndex: 'count',
       key: 'count',
       width: 150,
+      align: 'center' as const,
       render: (val: number) => <Text strong>{val}</Text>,
     },
     {
       title: 'Потерянная выручка',
       dataIndex: 'lostRevenue',
       key: 'lostRevenue',
-      width: 150,
+      width: 160,
+      align: 'center' as const,
       render: (val: number) => <Text style={{ color: '#ff4d4f' }}>{formatCurrency(val)}</Text>,
     },
     {
-      title: '% от общей',
+      title: '% от упущенной выручки',
       dataIndex: 'percent',
       key: 'percent',
-      width: 100,
+      width: 130,
+      align: 'center' as const,
       render: (val: number) => <Text>{val.toFixed(1)}%</Text>,
     },
   ];
@@ -251,24 +300,28 @@ const ProductsStockTab: React.FC = () => {
       dataIndex: 'date',
       key: 'date',
       width: 100,
+      align: 'center' as const,
     },
     {
       title: 'Товар',
       dataIndex: 'product',
       key: 'product',
       width: 150,
+      align: 'center' as const,
     },
     {
       title: 'Причина',
       dataIndex: 'reason',
       key: 'reason',
       width: 150,
+      align: 'center' as const,
     },
     {
       title: 'Сумма',
       dataIndex: 'amount',
       key: 'amount',
       width: 120,
+      align: 'center' as const,
       render: (val: number) => <Text>{formatCurrency(val)}</Text>,
     },
     {
@@ -276,6 +329,7 @@ const ProductsStockTab: React.FC = () => {
       dataIndex: 'status',
       key: 'status',
       width: 150,
+      align: 'center' as const,
       render: (val: string) => {
         const statusMap: Record<string, { color: string; text: string }> = {
           'resolved': { color: 'green', text: 'Урегулировано' },
@@ -452,7 +506,7 @@ const ProductsStockTab: React.FC = () => {
       )}
 
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} lg={16}>
+        <Col xs={24}>
           <Card title="📉 УПУЩЕННАЯ ПРИБЫЛЬ">
             {lostSales.length > 0 ? (
               <>
@@ -464,24 +518,87 @@ const ProductsStockTab: React.FC = () => {
                   size="small"
                   locale={{ emptyText: 'Нет данных' }}
                 />
-                <div style={{ marginTop: 16, height: 200 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={lostSales} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" />
-                      <YAxis dataKey="reason" type="category" width={100} />
-                      <RechartsTooltip />
-                      <Bar dataKey="lostRevenue" fill="#ff4d4f" name="Потерянная выручка" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
               </>
             ) : (
               <Empty description="Нет данных об упущенной прибыли" />
             )}
           </Card>
         </Col>
-        <Col xs={24} lg={8}>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24} md={12}>
+          <Card title="📊 УПУЩЕННАЯ ПРИБЫЛЬ ПО КАТЕГОРИЯМ">
+            {lostSalesByCategory.length > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <ResponsiveContainer width="100%" height={320}>
+                  <PieChart>
+                    <Pie
+                      data={lostSalesByCategory}
+                      dataKey="lostRevenue"
+                      nameKey="category"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={70}
+                      outerRadius={120}
+                      paddingAngle={3}
+                    >
+                      {lostSalesByCategory.map((_, index) => (
+                        <Cell key={index} fill={LOST_SALES_COLORS[index % LOST_SALES_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip formatter={(value: number, name: string, props: any) => [`${formatCurrency(value)}  (${props.payload.percent.toFixed(1)}%)`, name]} />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      formatter={(value: string) => <span style={{ fontSize: 13 }}>{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <Empty description="Нет данных" />
+            )}
+          </Card>
+        </Col>
+        <Col xs={24} md={12}>
+          <Card title="📊 УПУЩЕННАЯ ПРИБЫЛЬ ПО ПРИЧИНАМ">
+            {lostSales.length > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <ResponsiveContainer width="100%" height={320}>
+                  <PieChart>
+                    <Pie
+                      data={lostSales}
+                      dataKey="lostRevenue"
+                      nameKey="reason"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={70}
+                      outerRadius={120}
+                      paddingAngle={3}
+                    >
+                      {lostSales.map((_, index) => (
+                        <Cell key={index} fill={LOST_SALES_COLORS[index % LOST_SALES_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip formatter={(value: number, name: string, props: any) => [`${formatCurrency(value)}  (${props.payload.percent.toFixed(1)}%)`, name]} />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      formatter={(value: string) => <span style={{ fontSize: 13 }}>{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <Empty description="Нет данных" />
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24}>
           <Card title="🔄 ВОЗВРАТЫ И РЕКЛАМАЦИИ">
             <Space direction="vertical" style={{ width: '100%' }}>
               <Row gutter={[16, 8]}>
@@ -504,7 +621,83 @@ const ProductsStockTab: React.FC = () => {
               </Row>
             </Space>
           </Card>
-          <Card title="Детализация возвратов" style={{ marginTop: 16 }}>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24} md={12}>
+          <Card title="📊 ВОЗВРАТЫ ПО КАТЕГОРИЯМ">
+            {returnsByCategory.length > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <ResponsiveContainer width="100%" height={320}>
+                  <PieChart>
+                    <Pie
+                      data={returnsByCategory}
+                      dataKey="amount"
+                      nameKey="category"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={70}
+                      outerRadius={120}
+                      paddingAngle={3}
+                    >
+                      {returnsByCategory.map((_, index) => (
+                        <Cell key={index} fill={LOST_SALES_COLORS[index % LOST_SALES_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip formatter={(value: number, name: string, props: any) => [`${formatCurrency(value)}  (${props.payload.percent.toFixed(1)}%)`, name]} />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      formatter={(value: string) => <span style={{ fontSize: 13 }}>{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <Empty description="Нет данных" />
+            )}
+          </Card>
+        </Col>
+        <Col xs={24} md={12}>
+          <Card title="📊 ВОЗВРАТЫ ПО ПРИЧИНАМ">
+            {returnsByReason.length > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <ResponsiveContainer width="100%" height={320}>
+                  <PieChart>
+                    <Pie
+                      data={returnsByReason}
+                      dataKey="amount"
+                      nameKey="reason"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={70}
+                      outerRadius={120}
+                      paddingAngle={3}
+                    >
+                      {returnsByReason.map((_, index) => (
+                        <Cell key={index} fill={LOST_SALES_COLORS[index % LOST_SALES_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip formatter={(value: number, name: string, props: any) => [`${formatCurrency(value)}  (${props.payload.percent.toFixed(1)}%)`, name]} />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      formatter={(value: string) => <span style={{ fontSize: 13 }}>{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <Empty description="Нет данных" />
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24}>
+          <Card title="Детализация возвратов">
             {returns.length > 0 ? (
               <Table
                 dataSource={returns}

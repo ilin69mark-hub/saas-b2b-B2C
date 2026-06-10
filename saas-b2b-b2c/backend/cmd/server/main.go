@@ -90,6 +90,9 @@ func main() {
 	leadHandler := handlers.NewLeadHandler(leadService)
 	kpiHandler := handlers.NewKPIHandler(db, kpiService, scheduleService, alertService)
 	goalHandler := handlers.NewGoalHandler(goalService)
+	promotionRepo := repository.NewPromotionRepository(db)
+	promotionService := services.NewPromotionService(promotionRepo)
+	promotionHandler := handlers.NewPromotionHandler(promotionService)
 
 	r := gin.Default()
 	r.Use(middleware.CORS())
@@ -146,6 +149,7 @@ func main() {
 		protected.GET("/goals/by-date/:date", goalHandler.GetGoalByDate)
 		protected.DELETE("/goals/:id", goalHandler.DeleteGoal)
 		protected.PUT("/goals/:id", goalHandler.UpdateGoal)
+		protected.PUT("/goals/upsert", goalHandler.UpsertGoal)
 
 		protected.GET("/schedule", kpiHandler.GetSchedule)
 		protected.POST("/schedule", kpiHandler.CreateEvent)
@@ -173,6 +177,7 @@ func main() {
 		protected.GET("/dealer/tasks", kpiHandler.GetDealerTasks)
 		protected.PATCH("/dealer/tasks/:id", kpiHandler.UpdateDealerTask)
 		protected.GET("/dealer/requests", kpiHandler.GetDealerRequests)
+		protected.GET("/dealer/interactions", kpiHandler.GetDealerInteractions)
 		protected.POST("/dealer/requests", kpiHandler.CreateDealerRequest)
 		protected.GET("/dealer/marketing-budget", kpiHandler.GetDealerMarketingBudget)
 		protected.GET("/dealer/alerts", kpiHandler.GetDealerAlerts)
@@ -181,6 +186,10 @@ func main() {
 		protected.GET("/dealer/unit-templates", kpiHandler.GetUnitTemplates)
 		protected.POST("/dealer/unit-templates", kpiHandler.CreateUnitTemplate)
 		protected.DELETE("/dealer/unit-templates/:id", kpiHandler.DeleteUnitTemplate)
+		protected.GET("/dealer/promotions", promotionHandler.List)
+		protected.POST("/dealer/promotions", promotionHandler.Create)
+		protected.PUT("/dealer/promotions/:id", promotionHandler.Update)
+		protected.DELETE("/dealer/promotions/:id", promotionHandler.Delete)
 
 		// Dashboard Franchiser
 		protected.GET("/franchiser/summary", kpiHandler.GetFranchiserSummary)

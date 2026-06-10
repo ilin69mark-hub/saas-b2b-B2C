@@ -24,6 +24,11 @@ type Tenant struct {
     PaidUntil       *time.Time `json:"paid_until"`
     GracePeriodDays int        `json:"grace_period_days" gorm:"default:7"`
 
+    // Директивы (бенчмарки дилера)
+    TargetConversion     float64 `json:"target_conversion" gorm:"default:30"`
+    TargetExtrasPercent  float64 `json:"target_extras_percent" gorm:"default:15"`
+    MaxBonus             float64 `json:"max_bonus" gorm:"default:50000"`
+
     // Soft Delete (для аналитики Churn)
     DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 

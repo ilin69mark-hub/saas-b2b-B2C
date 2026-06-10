@@ -20,6 +20,7 @@ type GoalRepository interface {
 	Update(ctx context.Context, g *models.Goal) error
 	GetByID(ctx context.Context, id string) (*models.Goal, error)
 	GetByAssigneeAndDate(ctx context.Context, assigneeID string, date time.Time) (*models.Goal, error)
+	FindByAssigneeAndTargetDate(ctx context.Context, assigneeID uuid.UUID, targetDate time.Time) (*models.Goal, error)
 	ListVisibleForUser(ctx context.Context, userID, role, tenantID string) ([]models.Goal, error)
 	Delete(ctx context.Context, id string) error
 }
@@ -66,6 +67,16 @@ func (r *goalRepo) GetByAssigneeAndDate(ctx context.Context, assigneeID string, 
 	}
 	if err := r.db.WithContext(ctx).
 		Where("assignee_id = ? AND target_date = ?", assigneeUUID, date).
+		First(&g).Error; err != nil {
+		return nil, err
+	}
+	return &g, nil
+}
+
+func (r *goalRepo) FindByAssigneeAndTargetDate(ctx context.Context, assigneeID uuid.UUID, targetDate time.Time) (*models.Goal, error) {
+	var g models.Goal
+	if err := r.db.WithContext(ctx).
+		Where("assignee_id = ? AND target_date = ?", assigneeID, targetDate).
 		First(&g).Error; err != nil {
 		return nil, err
 	}

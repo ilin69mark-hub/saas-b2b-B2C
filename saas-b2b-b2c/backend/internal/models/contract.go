@@ -301,17 +301,6 @@ type TargetPlan struct {
 	Percent       int                 `json:"percent"`         // % выполнения
 }
 
-// Promotion - акция
-type Promotion struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Condition     string    `json:"condition"`     // Условие
-	DiscountMin   int       `json:"discount_min"`  // Мин. скидка
-	DiscountMax   int       `json:"discount_max"`  // Макс. скидка
-	EndDate       string    `json:"end_date"`      // Срок действия
-	IsExpiring    bool      `json:"is_expiring"`   // Истекает < 7 дней
-}
-
 // ManagerTargetsResponse - директивы от дилера
 type ManagerTargetsResponse struct {
 	HasTargets bool            `json:"has_targets"` // План утверждён
@@ -320,7 +309,7 @@ type ManagerTargetsResponse struct {
 	CurrentConversion float64  `json:"current_conversion"` // Текущая конверсия
 	TargetExtrasPercent float64 `json:"target_extras_percent"` // Целевая доля допов
 	CurrentExtrasPercent float64 `json:"current_extras_percent"` // Текущая доля допов
-	Promotions []Promotion     `json:"promotions"`  // Акции
+	Promotions []PromotionDTO  `json:"promotions"`  // Акции
 	BonusForecast float64      `json:"bonus_forecast"` // Прогноз премии
 	MaxBonus float64           `json:"max_bonus"`    // Максимальная премия
 	WarningLevel string        `json:"warning_level"` // none/yellow/red
@@ -418,6 +407,7 @@ type ManagerStatsData struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
 	Salon       string  `json:"salon"`
+	SalonID     string  `json:"salon_id"`
 	Revenue     float64 `json:"revenue"`
 	PlanPercent float64 `json:"planPercent"`
 	Conversion  float64 `json:"conversion"`
@@ -438,13 +428,24 @@ type DealerSalonBrief struct {
 
 // DealerProductsResponse - товары для дилера
 type DealerProductsResponse struct {
-	TotalRevenue   float64               `json:"total_revenue"`
-	TopProducts    []DealerTopProduct     `json:"top_products"`
-	Inventory      []DealerInventoryItem  `json:"inventory"`
-	LostSales      []LostSaleItem         `json:"lost_sales"`
-	Returns        []ReturnItem           `json:"returns"`
-	SalesDynamics  []SalesDynamicsPoint   `json:"sales_dynamics"`
-	Salons         []DealerSalonBrief     `json:"salons"`
+	TotalRevenue       float64                  `json:"total_revenue"`
+	TopProducts        []DealerTopProduct        `json:"top_products"`
+	Inventory          []DealerInventoryItem     `json:"inventory"`
+	LostSales          []LostSaleItem            `json:"lost_sales"`
+	LostSalesByCategory []LostSalesCategoryItem  `json:"lost_sales_by_category"`
+	Returns            []ReturnItem              `json:"returns"`
+	ReturnsByCategory  []ReturnsCategoryItem     `json:"returns_by_category"`
+	ReturnsByReason    []ReturnsReasonItem       `json:"returns_by_reason"`
+	SalesDynamics      []SalesDynamicsPoint      `json:"sales_dynamics"`
+	Salons             []DealerSalonBrief        `json:"salons"`
+}
+
+// LostSalesCategoryItem - упущенная прибыль по категории товара
+type LostSalesCategoryItem struct {
+	Category    string  `json:"category"`
+	Count       int     `json:"count"`
+	LostRevenue float64 `json:"lost_revenue"`
+	Percent     float64 `json:"percent"`
 }
 
 // DealerTopProduct - топ товар
@@ -474,6 +475,32 @@ type LostSaleItem struct {
 	Count       int     `json:"count"`
 	LostRevenue float64 `json:"lost_revenue"`
 	Percent     float64 `json:"percent"`
+}
+
+// ReturnsCategoryItem - возвраты по категории товара
+type ReturnsCategoryItem struct {
+	Category string  `json:"category"`
+	Count    int     `json:"count"`
+	Amount   float64 `json:"amount"`
+	Percent  float64 `json:"percent"`
+}
+
+// DealerInteractionItem - взаимодействие дилера с брендом
+type DealerInteractionItem struct {
+	ID          string `json:"id"`
+	Date        string `json:"date"`
+	Type        string `json:"type"`
+	Summary     string `json:"summary"`
+	Result      string `json:"result"`
+	ManagerName string `json:"manager_name"`
+}
+
+// ReturnsReasonItem - возвраты по причине
+type ReturnsReasonItem struct {
+	Reason  string  `json:"reason"`
+	Count   int     `json:"count"`
+	Amount  float64 `json:"amount"`
+	Percent float64 `json:"percent"`
 }
 
 // ReturnItem - возврат
@@ -760,13 +787,23 @@ type DealerRequestItem struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// DealerBudgetItem - статья расхода маркетингового бюджета
+type DealerBudgetItem struct {
+	ID      string `json:"id"`
+	Date    string `json:"date"`
+	Purpose string `json:"purpose"`
+	Amount  float64 `json:"amount"`
+	Status  string `json:"status"`
+}
+
 // DealerMarketingBudgetResponse - маркетинговый бюджет
 type DealerMarketingBudgetResponse struct {
-	Quarter       string `json:"quarter"`
-	TotalAmount   float64 `json:"total_amount"`
-	UsedAmount    float64 `json:"used_amount"`
-	Remaining     float64 `json:"remaining"`
-	UsagePercent  int     `json:"usage_percent"`
+	Quarter       string             `json:"quarter"`
+	TotalAmount   float64            `json:"total_amount"`
+	UsedAmount    float64            `json:"used_amount"`
+	Remaining     float64            `json:"remaining"`
+	UsagePercent  int                `json:"usage_percent"`
+	Items         []DealerBudgetItem `json:"items"`
 }
 
 // DealerAlertsResponse - алерты дилера

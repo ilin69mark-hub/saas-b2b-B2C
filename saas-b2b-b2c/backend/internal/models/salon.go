@@ -13,8 +13,6 @@ type Salon struct {
 	Address   string    `json:"address"`
 	CreatedAt time.Time `json:"created_at"`
 
-	// НОВОЕ ПОЛЕ: Связь с менеджером
-	// gorm:"-" означает, что это поле не хранится в БД, оно вычисляется на лету.
 	Manager *User `json:"manager" gorm:"-"`
 }
 

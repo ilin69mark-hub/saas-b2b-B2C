@@ -65,7 +65,8 @@ const DealerDirectives: React.FC<DealerDirectivesProps> = ({ user }) => {
     }
   }, [open, data, fetchTargets]);
 
-  const formatMoney = (val: number) => new Intl.NumberFormat('ru-RU').format(val);
+  const formatMoney = (val: number) =>
+    new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val);
 
   const getPlanColor = (percent: number) => {
     if (percent >= 80) return '#52c41a';
@@ -189,7 +190,7 @@ const DealerDirectives: React.FC<DealerDirectivesProps> = ({ user }) => {
             {/* Акции */}
             <Card title="Акции" size="small" style={{ marginBottom: 16 }}>
               {data?.promotions?.map((promo) => (
-                <div key={promo.id} style={{ marginBottom: 12, padding: 8, background: promo.is_expiring ? '#fff7e6' : '#fafafa', borderRadius: 4, borderLeft: promo.is_expiring ? '3px solid #faad14' : '3px solid #52c41a' }}>
+                <div key={promo.id} style={{ marginBottom: 12, padding: 8, background: promo.is_expiring ? '#fff7e6' : 'transparent', borderRadius: 4, borderLeft: promo.is_expiring ? '3px solid #faad14' : '3px solid #52c41a' }}>
                   <Row justify="space-between" align="middle">
                     <Col>
                       <Text strong>{promo.name}</Text>

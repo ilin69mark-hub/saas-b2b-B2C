@@ -13,6 +13,7 @@ type Order struct {
 	Status      string    `json:"status" gorm:"default:'new'"` // new, waiting_payment, in_progress...
 	Description string    `json:"description"`
 	TotalPrice  float64   `json:"total_price"`
+	IsExtra     bool      `json:"is_extra" gorm:"default:false"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { Layout, Row, Col, Card, Typography, Tabs, Spin, Statistic } from 'antd';
+import { Layout, Row, Col, Card, Typography, Tabs, Spin, message } from 'antd';
 import { ShopOutlined, DollarOutlined, PercentageOutlined, GiftOutlined, SunOutlined, MoonOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import 'dayjs/locale/ru';
@@ -43,6 +43,7 @@ const SalonManagerDashboard: React.FC<SalonManagerDashboardProps> = ({ user, tit
       setTopBarData(res.data);
     } catch (e) {
       console.error('Error fetching top bar data', e);
+      message.error('Ошибка загрузки данных топбара');
       setTopBarData({
         salon_name: user.salon_name || 'Мой салон',
         plan_percent: 0,
@@ -73,7 +74,8 @@ const SalonManagerDashboard: React.FC<SalonManagerDashboardProps> = ({ user, tit
     return '#ff4d4f';
   };
 
-  const formatMoney = (val: number) => new Intl.NumberFormat('ru-RU').format(val);
+  const formatMoney = (val: number) =>
+    new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val);
 
   const tabItems = [
     { key: 'main', label: 'Главная' },

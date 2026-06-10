@@ -15,6 +15,7 @@ import (
 type GoalService interface {
 	CreateGoal(ctx context.Context, dto CreateGoalDTO, assignerID, tenantID string) (*models.Goal, error)
 	UpdateGoal(ctx context.Context, id string, dto UpdateGoalDTO, assignerID, tenantID string) (*models.Goal, error)
+	UpsertGoal(ctx context.Context, dto CreateGoalDTO, assignerID, tenantID string) (*models.Goal, error)
 	GetMyGoal(ctx context.Context, assigneeID string, date time.Time) (*models.Goal, error)
 	GetVisibleGoals(ctx context.Context, userID, role, tenantID string) ([]models.Goal, error)
 	DeleteGoal(ctx context.Context, id string) error
@@ -22,26 +23,32 @@ type GoalService interface {
 
 /* DTO – данные, получаемые от фронтенда */
 type CreateGoalDTO struct {
-	AssigneeID   string  `json:"assignee_id"`
-	Role         string  `json:"role"`
-	SalesPlan    float64 `json:"sales_plan"`
-	LeadsPlan    int     `json:"leads_plan"`
-	CallsPlan    int     `json:"calls_plan"`
-	MeetingsPlan int     `json:"meetings_plan"`
-	Period      string  `json:"period"`       // "day", "week", "month"
-	StartDate    string  `json:"start_date"`  // YYYY-MM-DD
-	EndDate     string  `json:"end_date"`   // YYYY-MM-DD
-	TargetDate  string  `json:"target_date"` // deprecated
+	AssigneeID           string  `json:"assignee_id"`
+	Role                 string  `json:"role"`
+	SalesPlan            float64 `json:"sales_plan"`
+	LeadsPlan            int     `json:"leads_plan"`
+	CallsPlan            int     `json:"calls_plan"`
+	MeetingsPlan         int     `json:"meetings_plan"`
+	TargetConversion     float64 `json:"target_conversion"`
+	TargetExtrasPercent  float64 `json:"target_extras_percent"`
+	MaxBonus             float64 `json:"max_bonus"`
+	Period              string  `json:"period"`       // "day", "week", "month"
+	StartDate            string  `json:"start_date"`  // YYYY-MM-DD
+	EndDate             string  `json:"end_date"`   // YYYY-MM-DD
+	TargetDate          string  `json:"target_date"` // deprecated
 }
 
 type UpdateGoalDTO struct {
-	SalesPlan    float64 `json:"sales_plan"`
-	LeadsPlan   int     `json:"leads_plan"`
-	CallsPlan   int     `json:"calls_plan"`
-	MeetingsPlan int     `json:"meetings_plan"`
-	Period     string  `json:"period"`
-	StartDate   string  `json:"start_date"`
-	EndDate    string  `json:"end_date"`
+	SalesPlan            float64  `json:"sales_plan"`
+	LeadsPlan           int      `json:"leads_plan"`
+	CallsPlan           int      `json:"calls_plan"`
+	MeetingsPlan         int      `json:"meetings_plan"`
+	TargetConversion     *float64 `json:"target_conversion"`
+	TargetExtrasPercent  *float64 `json:"target_extras_percent"`
+	MaxBonus             *float64 `json:"max_bonus"`
+	Period              string   `json:"period"`
+	StartDate            string   `json:"start_date"`
+	EndDate             string   `json:"end_date"`
 }
 
 /* Реализация */
@@ -102,17 +109,20 @@ func (s *goalService) CreateGoal(ctx context.Context, dto CreateGoalDTO, assigne
 	targetDate = endDate
 
 	goal := &models.Goal{
-		AssignerID:    uuid.MustParse(assignerID),
-		AssigneeID:   assigneeUUID,
-		Role:        dto.Role,
-		SalesPlan:    dto.SalesPlan,
-		LeadsPlan:   dto.LeadsPlan,
-		CallsPlan:   dto.CallsPlan,
-		MeetingsPlan: dto.MeetingsPlan,
-		Period:     period,
-		StartDate:  startDate,
-		EndDate:   endDate,
-		TargetDate: targetDate,
+		AssignerID:          uuid.MustParse(assignerID),
+		AssigneeID:          assigneeUUID,
+		Role:                dto.Role,
+		SalesPlan:           dto.SalesPlan,
+		LeadsPlan:           dto.LeadsPlan,
+		CallsPlan:           dto.CallsPlan,
+		MeetingsPlan:        dto.MeetingsPlan,
+		TargetConversion:    dto.TargetConversion,
+		TargetExtrasPercent: dto.TargetExtrasPercent,
+		MaxBonus:            dto.MaxBonus,
+		Period:              period,
+		StartDate:           startDate,
+		EndDate:             endDate,
+		TargetDate:          targetDate,
 	}
 	if tenantID != "" {
 		tid, _ := uuid.Parse(tenantID)
@@ -122,6 +132,34 @@ func (s *goalService) CreateGoal(ctx context.Context, dto CreateGoalDTO, assigne
 		return nil, err
 	}
 	return goal, nil
+}
+
+/* ---------- UpsertGoal — создать или обновить план на период ---------- */
+func (s *goalService) UpsertGoal(ctx context.Context, dto CreateGoalDTO, assignerID, tenantID string) (*models.Goal, error) {
+	assigneeUUID, err := uuid.Parse(dto.AssigneeID)
+	if err != nil {
+		return nil, err
+	}
+	targetDate, _ := time.Parse("2006-01-02", dto.TargetDate)
+
+	existing, err := s.repo.FindByAssigneeAndTargetDate(ctx, assigneeUUID, targetDate)
+	if err == nil && existing != nil {
+		// Обновляем существующий
+		upd := UpdateGoalDTO{
+			SalesPlan:           dto.SalesPlan,
+			LeadsPlan:           dto.LeadsPlan,
+			CallsPlan:           dto.CallsPlan,
+			MeetingsPlan:        dto.MeetingsPlan,
+			TargetConversion:    &dto.TargetConversion,
+			TargetExtrasPercent: &dto.TargetExtrasPercent,
+			MaxBonus:            &dto.MaxBonus,
+			Period:              dto.Period,
+			StartDate:           dto.StartDate,
+			EndDate:             dto.EndDate,
+		}
+		return s.UpdateGoal(ctx, existing.ID.String(), upd, assignerID, tenantID)
+	}
+	return s.CreateGoal(ctx, dto, assignerID, tenantID)
 }
 
 /* ---------- UpdateGoal ---------- */
@@ -151,6 +189,15 @@ func (s *goalService) UpdateGoal(ctx context.Context, id string, dto UpdateGoalD
 	}
 	if dto.EndDate != "" {
 		goal.EndDate, _ = time.Parse("2006-01-02", dto.EndDate)
+	}
+	if dto.TargetConversion != nil {
+		goal.TargetConversion = *dto.TargetConversion
+	}
+	if dto.TargetExtrasPercent != nil {
+		goal.TargetExtrasPercent = *dto.TargetExtrasPercent
+	}
+	if dto.MaxBonus != nil {
+		goal.MaxBonus = *dto.MaxBonus
 	}
 
 	if err := s.repo.Update(ctx, goal); err != nil {

@@ -27,6 +27,9 @@ type Goal struct {
 	LeadsPlan   int       `json:"leads_plan"`
 	CallsPlan   int       `json:"calls_plan"`
 	MeetingsPlan int       `json:"meetings_plan"`
+	TargetConversion     float64   `json:"target_conversion" gorm:"default:0"`
+	TargetExtrasPercent  float64   `json:"target_extras_percent" gorm:"default:0"`
+	MaxBonus             float64   `json:"max_bonus" gorm:"default:0"`
 	Period     GoalPeriod `json:"period" gorm:"type:varchar(20);default:'day'"`
 	Status     string    `json:"status" gorm:"default:'active'"`
 	StartDate   time.Time `json:"start_date" gorm:"type:date"`

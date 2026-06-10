@@ -31,30 +31,6 @@ func (m *MockAnalyticsRepo) CalculateDashboardMain(ctx context.Context, userID u
 	return args.Get(0).(*models.DashboardMainResponse), args.Error(1)
 }
 
-func (m *MockAnalyticsRepo) CalculateDashboardFunnel(ctx context.Context, userID uuid.UUID, dateStr string) (*models.DashboardFunnelResponse, error) {
-	args := m.Called(ctx, userID, dateStr)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*models.DashboardFunnelResponse), args.Error(1)
-}
-
-func (m *MockAnalyticsRepo) CalculateTerritoryPlanFact(ctx context.Context, userID uuid.UUID, period string) (*models.TerritoryPlanFactResponse, error) {
-	args := m.Called(ctx, userID, period)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*models.TerritoryPlanFactResponse), args.Error(1)
-}
-
-func (m *MockAnalyticsRepo) CalculateManagerTargets(ctx context.Context, userID uuid.UUID, dateStr string) (*models.ManagerTargetsResponse, error) {
-	args := m.Called(ctx, userID, dateStr)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*models.ManagerTargetsResponse), args.Error(1)
-}
-
 func TestKPIService_GetDashboardStats_WithAnalytics(t *testing.T) {
 	mockKpi := new(MockKPIRepositoryForTest)
 	mockSched := new(MockScheduleRepositoryForTest)

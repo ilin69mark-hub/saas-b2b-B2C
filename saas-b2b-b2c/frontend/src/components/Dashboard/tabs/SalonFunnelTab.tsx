@@ -69,6 +69,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
   const [error, setError] = useState<string | null>(null);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [selectedLead, setSelectedLead] = useState<any>(null);
   const [form] = Form.useForm();
 
@@ -280,15 +281,15 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
   }
 
   // Фильтр сделок по этапу
+  const stageMap: Record<string, string[]> = {
+    traffic: ['new'],
+    consultation: ['contact'],
+    measurement: ['meeting'],
+    kp: ['wait'],
+    contract: ['sale'],
+    payment: ['paid'],
+  };
   const stageLeads = selectedStage ? leads?.filter(l => {
-    const stageMap: Record<string, string[]> = {
-      traffic: ['new'],
-      consultation: ['contact'],
-      measurement: ['meeting'],
-      kp: ['wait'],
-      contract: ['sale'],
-      payment: ['paid'],
-    };
     return stageMap[selectedStage]?.includes(l.status);
   }) : [];
 

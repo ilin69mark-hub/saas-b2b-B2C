@@ -12,9 +12,6 @@ import (
 type AnalyticsRepositoryInterface interface {
 	CalculateDashboardStats(ctx context.Context, userID *uuid.UUID, salonID *uuid.UUID, isManager bool) (*models.DashboardStatsResponse, error)
 	CalculateDashboardMain(ctx context.Context, userID uuid.UUID, dateStr string) (*models.DashboardMainResponse, error)
-	CalculateDashboardFunnel(ctx context.Context, userID uuid.UUID, dateStr string) (*models.DashboardFunnelResponse, error)
-	CalculateTerritoryPlanFact(ctx context.Context, userID uuid.UUID, period string) (*models.TerritoryPlanFactResponse, error)
-	CalculateManagerTargets(ctx context.Context, userID uuid.UUID, dateStr string) (*models.ManagerTargetsResponse, error)
 }
 
 type AnalyticsRepository struct {
@@ -109,18 +106,6 @@ func (r *AnalyticsRepository) CalculateDashboardMain(ctx context.Context, userID
 	resp.PlanPercent = calcPercent(plan, fact).Percent
 
 	return resp, nil
-}
-
-func (r *AnalyticsRepository) CalculateDashboardFunnel(ctx context.Context, userID uuid.UUID, dateStr string) (*models.DashboardFunnelResponse, error) {
-	return &models.DashboardFunnelResponse{Stages: []models.FunnelStage{}}, nil
-}
-
-func (r *AnalyticsRepository) CalculateTerritoryPlanFact(ctx context.Context, userID uuid.UUID, period string) (*models.TerritoryPlanFactResponse, error) {
-	return &models.TerritoryPlanFactResponse{}, nil
-}
-
-func (r *AnalyticsRepository) CalculateManagerTargets(ctx context.Context, userID uuid.UUID, dateStr string) (*models.ManagerTargetsResponse, error) {
-	return &models.ManagerTargetsResponse{}, nil
 }
 
 var _ AnalyticsRepositoryInterface = (*AnalyticsRepository)(nil)

@@ -28,6 +28,9 @@ import (
 //go:embed fonts/*.ttf
 var reportFonts embed.FS
 
+// Норма входящего трафика (лидов в день) для светофора
+const defaultNormTraffic = 10
+
 type KPIService struct {
 	DB       *gorm.DB // Публичное поле для доступа из хендлеров
 	kpiRepo  repository.KPIRepositoryInterface
@@ -263,8 +266,12 @@ func (s *KPIService) GetDashboardMain(ctx context.Context, userID uuid.UUID, dat
 	// Факт на текущий момент (сумма продаж из leads со статусом sale)
 	var monthFact, orderFact float64
 	resp := &models.DashboardMainResponse{}
-	var salonID uuid.UUID
-	s.DB.Table("users").Where("id = ?", userID).Select("salon_id").Scan(&salonID)
+	var salonIDStr string
+	s.DB.Table("users").Where("id = ?", userID).Select("salon_id::text").Scan(&salonIDStr)
+	if salonIDStr == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	salonID := uuid.MustParse(salonIDStr)
 	s.DB.Model(&models.Lead{}).
 		Where("salon_id = ? AND status = ? AND created_at BETWEEN ? AND ?", salonID, "sale", firstOfMonth, targetDate).
 		Select("COALESCE(SUM(budget), 0)").Scan(&monthFact)
@@ -373,7 +380,7 @@ func (s *KPIService) GetDashboardMain(ctx context.Context, userID uuid.UUID, dat
 		Count(&todayLeads)
 
 	// Норма - 10 лидов в день (можно сделать настраиваемой)
-	normTraffic := 10
+	normTraffic := defaultNormTraffic
 	if todayLeads >= int64(normTraffic) {
 		resp.TrafficStatus = "green"
 	} else if todayLeads >= int64(normTraffic/2) {
@@ -816,70 +823,119 @@ func (s *KPIService) GetDashboardProducts(ctx context.Context, userID uuid.UUID,
 		}
 	}
 
+	// Маппинг collection → category из product_inventory
+	type invMapping struct {
+		Collection string
+		Category   string
+	}
+	var invMappings []invMapping
+	s.DB.Raw("SELECT DISTINCT collection, category FROM product_inventory WHERE salon_id = ?", salonID).
+		Scan(&invMappings)
+	catByCollection := make(map[string]string)
+	for _, m := range invMappings {
+		catByCollection[m.Collection] = m.Category
+	}
+
 	for _, ps := range productStatsList {
 		share := 0.0
 		if totalRevenue > 0 {
 			share = (ps.Revenue / totalRevenue) * 100
 		}
+		category := catByCollection[ps.Name]
+		if category == "" {
+			category = "Мебель"
+		}
 		resp.TopProducts = append(resp.TopProducts, models.TopProduct{
 			ID:           ps.Name,
 			Name:         ps.Name,
-			Collection:   "Основная",
-			Category:     "Мебель",
+			Collection:   ps.Name,
+			Category:     category,
 			Revenue:      ps.Revenue,
 			Quantity:     ps.Quantity,
 			SharePercent: share,
-			Margin:       25.0, // Заглушка
+			Margin:       25.0,
 		})
 	}
 
-	// === ОСТАТКИ (заглушка - нужна таблица products/stock) ===
-	// Симулируем остатки для демонстрации
-	sampleProducts := []string{"Диван", "Кресло", "Кровать", "Шкаф", "Стол"}
-	for i, name := range sampleProducts {
-		showroom := 1 + i
-		warehouse := 5 + i*2
-		cost := float64((showroom + warehouse) * 50000)
-		turnover := 30 + i*10
-		if turnover > 90 {
-			turnover = 120 // Неликвид
-		}
+	// === ОСТАТКИ ИЗ product_inventory ===
+	type invRow struct {
+		ID              string
+		Collection      string
+		Category        string
+		StockWarehouse  int
+		OnDisplay       int
+		TotalStockValue float64
+		TurnoverDays    int
+	}
+	var invRows []invRow
+	s.DB.Raw(`
+		SELECT id::text, collection, category, stock_warehouse, on_display, total_stock_value, turnover_days
+		FROM product_inventory
+		WHERE salon_id = ?
+	`, salonID).Scan(&invRows)
+
+	for _, r := range invRows {
 		resp.StockItems = append(resp.StockItems, models.StockItem{
-			ID:           name,
-			Name:         name,
-			Category:     "Мебель",
-			ShowroomQty:  showroom,
-			WarehouseQty: warehouse,
-			TotalCost:    cost,
-			TurnoverDays: turnover,
+			ID:           r.ID,
+			Name:         r.Collection,
+			Category:     r.Category,
+			ShowroomQty:  r.OnDisplay,
+			WarehouseQty: r.StockWarehouse,
+			TotalCost:    r.TotalStockValue,
+			TurnoverDays: r.TurnoverDays,
 		})
 	}
 
-	// === УПУЩЕННЫЕ ПРОДАЖИ ===
-	lostReasons := map[string]float64{
-		"Нет в наличии":           150000,
-		"Долгий срок производства": 80000,
-		"Не устроила цена":        200000,
-		"Не подошёл дизайн":       120000,
+	// === УПУЩЕННЫЕ ПРОДАЖИ ИЗ leads ===
+	type lostRow struct {
+		Reason      string
+		Count       int64
+		LostRevenue float64
 	}
-	for reason, revenue := range lostReasons {
-		count := int(revenue / 50000) // Примерное количество
+	var lostRows []lostRow
+	s.DB.Raw(`
+		SELECT COALESCE(NULLIF(disqualify_reason, ''), 'Зависший лид') AS reason,
+			COUNT(*) AS count,
+			COALESCE(SUM(budget), 0) AS lost_revenue
+		FROM leads
+		WHERE salon_id = ?
+			AND status NOT IN ('sale', 'paid')
+			AND (
+				(disqualify_reason IS NOT NULL AND disqualify_reason != '')
+				OR created_at < NOW() - INTERVAL '60 days'
+			)
+		GROUP BY COALESCE(NULLIF(disqualify_reason, ''), 'Зависший лид')
+	`, salonID).Scan(&lostRows)
+
+	for _, r := range lostRows {
 		resp.LostSales = append(resp.LostSales, models.LostSale{
-			Reason:        reason,
-			RequestsCount: count,
-			LostRevenue:   revenue,
+			Reason:        r.Reason,
+			RequestsCount: int(r.Count),
+			LostRevenue:   r.LostRevenue,
 		})
 	}
 
-	// === ОБОРАЧИВАЕМОСТЬ ПО КАТЕГОРИЯМ ===
-	categories := []string{"Диваны", "Кресла", "Кровати", "Шкафы", "Столы"}
-	for _, cat := range categories {
-		days := 30 + (len(cat) * 5) // Заглушка
-		slowMoving := days > 90
+	// === ОБОРАЧИВАЕМОСТЬ ПО КАТЕГОРИЯМ ИЗ product_inventory ===
+	type catTurnRow struct {
+		Category string
+		AvgDays  float64
+	}
+	var catTurnRows []catTurnRow
+	s.DB.Raw(`
+		SELECT category,
+			COALESCE(AVG(turnover_days), 0) AS avg_days
+		FROM product_inventory
+		WHERE salon_id = ? AND category != ''
+		GROUP BY category
+		ORDER BY avg_days DESC
+	`, salonID).Scan(&catTurnRows)
+
+	for _, r := range catTurnRows {
+		days := int(r.AvgDays)
 		resp.CategoryTurnover = append(resp.CategoryTurnover, models.CategoryTurnover{
-			Category:    cat,
-			AvgDays:     days,
-			IsSlowMoving: slowMoving,
+			Category:     r.Category,
+			AvgDays:      days,
+			IsSlowMoving: days > 90,
 		})
 	}
 
@@ -894,7 +950,7 @@ func (s *KPIService) GetManagerTargets(ctx context.Context, userID uuid.UUID, da
 		CurrentConversion:    0,
 		TargetExtrasPercent:  0,
 		CurrentExtrasPercent: 0,
-		Promotions:          []models.Promotion{},
+		Promotions:          []models.PromotionDTO{},
 		BonusForecast:        0,
 		MaxBonus:             0,
 		WarningLevel:         "none",
@@ -910,21 +966,21 @@ func (s *KPIService) GetManagerTargets(ctx context.Context, userID uuid.UUID, da
 	salonID := *user.SalonID
 
 	// === План продаж ===
-	firstOfMonth := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.Now().Location())
+	now := time.Now()
+	firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	lastOfMonth := firstOfMonth.AddDate(0, 1, -1)
 
-	// План на месяц - ищем по assignee_id в таблице goals
+	// План на месяц - ищем по assignee_id в таблице goals (от начала до конца месяца, как в дашборде)
 	var planAmount float64
 	s.DB.Model(&models.Goal{}).
-		Where("assignee_id = ? AND target_date BETWEEN ? AND ?", userID, firstOfMonth, time.Now()).
+		Where("assignee_id = ? AND target_date BETWEEN ? AND ?", userID, firstOfMonth, lastOfMonth).
 		Select("COALESCE(SUM(sales_plan), 0)").Scan(&planAmount)
-	// Также учитываем периоды month/week/year
 	if planAmount == 0 {
 		s.DB.Model(&models.Goal{}).
-			Where("assignee_id = ? AND period IN ('month', 'year')", userID).
+			Where("assignee_id = ? AND period IN ('month', 'year') AND target_date >= ?", userID, firstOfMonth).
 			Select("COALESCE(SUM(sales_plan), 0)").Scan(&planAmount)
 	}
 
-	// Если план не утверждён (не задан)
 	if planAmount == 0 {
 		resp.HasTargets = false
 		resp.Plan = nil
@@ -933,14 +989,15 @@ func (s *KPIService) GetManagerTargets(ctx context.Context, userID uuid.UUID, da
 
 	resp.HasTargets = true
 
-	// Текущее выполнение - используем salonID из user
-	var currentAmount float64
-	var currentUser models.User
-	if err := s.DB.First(&currentUser, userID).Error; err == nil && currentUser.SalonID != nil {
-		s.DB.Model(&models.Lead{}).
-			Where("salon_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", currentUser.SalonID, []string{"sale", "paid"}, firstOfMonth, time.Now()).
-			Select("COALESCE(SUM(budget), 0)").Scan(&currentAmount)
-	}
+	// Текущее выполнение — unified с дашбордом: лиды + заказы
+	var currentAmount, orderAmount float64
+	s.DB.Model(&models.Lead{}).
+		Where("salon_id = ? AND status = ? AND created_at BETWEEN ? AND ?", salonID, "sale", firstOfMonth, now).
+		Select("COALESCE(SUM(budget), 0)").Scan(&currentAmount)
+	s.DB.Model(&models.Order{}).
+		Where("salon_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", salonID, []string{"paid", "contract"}, firstOfMonth, now).
+		Select("COALESCE(SUM(total_price), 0)").Scan(&orderAmount)
+	currentAmount += orderAmount
 
 	percent := 0
 	if planAmount > 0 {
@@ -964,8 +1021,40 @@ func (s *KPIService) GetManagerTargets(ctx context.Context, userID uuid.UUID, da
 	}
 
 	// === Бенчмарки ===
-	resp.TargetConversion = 30.0 // 30% - цель
-	resp.TargetExtrasPercent = 15.0 // 15% - цель
+	// Читаем из goal пользователя (приоритет), затем из tenant, затем default
+	var goalForTargets models.Goal
+	s.DB.Where("assignee_id = ? AND target_date BETWEEN ? AND ?", userID, firstOfMonth, lastOfMonth).
+		First(&goalForTargets)
+
+	loadTargetConversion := func() float64 {
+		if goalForTargets.TargetConversion > 0 {
+			return goalForTargets.TargetConversion
+		}
+		if user.TenantID != nil {
+			var tenant models.Tenant
+			s.DB.First(&tenant, user.TenantID)
+			if tenant.TargetConversion > 0 {
+				return tenant.TargetConversion
+			}
+		}
+		return 30.0
+	}
+	loadTargetExtras := func() float64 {
+		if goalForTargets.TargetExtrasPercent > 0 {
+			return goalForTargets.TargetExtrasPercent
+		}
+		if user.TenantID != nil {
+			var tenant models.Tenant
+			s.DB.First(&tenant, user.TenantID)
+			if tenant.TargetExtrasPercent > 0 {
+				return tenant.TargetExtrasPercent
+			}
+		}
+		return 15.0
+	}
+
+	resp.TargetConversion = loadTargetConversion()
+	resp.TargetExtrasPercent = loadTargetExtras()
 
 	// Текущая конверсия
 	var totalLeads, saleLeads int64
@@ -979,43 +1068,41 @@ func (s *KPIService) GetManagerTargets(ctx context.Context, userID uuid.UUID, da
 	if totalLeads > 0 {
 		resp.CurrentConversion = (float64(saleLeads) / float64(totalLeads)) * 100
 	}
-	resp.CurrentExtrasPercent = 12.0 // Заглушка
+	var extraSum, totalSum float64
+	s.DB.Model(&models.Order{}).
+		Where("salon_id = ? AND status = 'paid' AND created_at BETWEEN ? AND ?", salonID, firstOfMonth, time.Now()).
+		Select("COALESCE(SUM(CASE WHEN is_extra THEN total_price ELSE 0 END), 0), COALESCE(SUM(total_price), 0)").
+		Row().Scan(&extraSum, &totalSum)
+	if totalSum > 0 {
+		resp.CurrentExtrasPercent = (extraSum / totalSum) * 100
+	}
 
 	// === Акции ===
-	now := time.Now()
-	promotions := []models.Promotion{
-		{
-			ID:            "1",
-			Name:          "Летняя распродажа",
-			Condition:     "При покупке дивана - кресло в подарок",
-			DiscountMin:   10,
-			DiscountMax:   25,
-			EndDate:       now.AddDate(0, 0, 5).Format("2006-01-02"),
-			IsExpiring:    true,
-		},
-		{
-			ID:            "2",
-			Name:          "Комплект со скидкой",
-			Condition:     "Мебель + услуги дизайнера",
-			DiscountMin:   15,
-			DiscountMax:   30,
-			EndDate:       now.AddDate(0, 0, 14).Format("2006-01-02"),
-			IsExpiring:    false,
-		},
-		{
-			ID:            "3",
-			Name:          "Акция выходного дня",
-			Condition:     "Скидка 20% в субботу и воскресенье",
-			DiscountMin:   20,
-			DiscountMax:   20,
-			EndDate:       now.AddDate(0, 0, 3).Format("2006-01-02"),
-			IsExpiring:    true,
-		},
+	if user.TenantID != nil {
+		var dbPromos []models.Promotion
+		s.DB.Where("tenant_id = ? AND is_active = true", user.TenantID).Order("created_at DESC").Find(&dbPromos)
+		dtos := make([]models.PromotionDTO, len(dbPromos))
+		for i, p := range dbPromos {
+			dtos[i] = p.ToDTO()
+		}
+		resp.Promotions = dtos
 	}
-	resp.Promotions = promotions
 
 	// === Прогноз премии ===
-	maxBonus := 50000.0 // Максимальная премия
+	loadMaxBonus := func() float64 {
+		if goalForTargets.MaxBonus > 0 {
+			return goalForTargets.MaxBonus
+		}
+		if user.TenantID != nil {
+			var tenant models.Tenant
+			s.DB.First(&tenant, user.TenantID)
+			if tenant.MaxBonus > 0 {
+				return tenant.MaxBonus
+			}
+		}
+		return 50000.0
+	}
+	maxBonus := loadMaxBonus()
 	if percent >= 100 {
 		resp.BonusForecast = maxBonus
 	} else if percent >= 80 {
@@ -1029,10 +1116,10 @@ func (s *KPIService) GetManagerTargets(ctx context.Context, userID uuid.UUID, da
 
 	// Уровень предупреждения
 	bonusPercent := (resp.BonusForecast / maxBonus) * 100
-	if bonusPercent < 50 {
-		resp.WarningLevel = "yellow"
-	} else if bonusPercent < 30 {
+	if bonusPercent < 30 {
 		resp.WarningLevel = "red"
+	} else if bonusPercent < 60 {
+		resp.WarningLevel = "yellow"
 	} else {
 		resp.WarningLevel = "none"
 	}
@@ -1525,13 +1612,14 @@ func (s *KPIService) GetDealerFunnel(ctx context.Context, userID uuid.UUID, peri
 
 	if len(allManagerIDs) > 0 {
 		type managerRow struct {
-			ID     uuid.UUID
-			Name   string
-			Salon  string
+			ID      uuid.UUID
+			Name    string
+			Salon   string
+			SalonID string
 		}
 		var managerRows []managerRow
 		s.DB.Model(&models.User{}).
-			Select("users.id, CONCAT(users.first_name, ' ', users.last_name) as name, salons.name as salon").
+			Select("users.id, CONCAT(users.first_name, ' ', users.last_name) as name, salons.name as salon, salons.id::text as salon_id").
 			Joins("LEFT JOIN salons ON salons.id = users.salon_id").
 			Where("users.id IN ?", allManagerIDs).
 			Scan(&managerRows)
@@ -1599,6 +1687,7 @@ func (s *KPIService) GetDealerFunnel(ctx context.Context, userID uuid.UUID, peri
 				ID:          uid,
 				Name:        row.Name,
 				Salon:       row.Salon,
+				SalonID:     row.SalonID,
 				Revenue:     rev,
 				PlanPercent: planPct,
 				Conversion:  conv,
@@ -1817,7 +1906,7 @@ func (s *KPIService) GetDealerProducts(ctx context.Context, userID uuid.UUID, pe
 		})
 	}
 
-	// Lost Sales - лиды с незакрытыми сделками (не sale/paid)
+	// Lost Sales - несконвертированные лиды с причиной ИЛИ зависшие >60 дней
 	type lostRow struct {
 		Reason      string
 		Count       int64
@@ -1825,14 +1914,19 @@ func (s *KPIService) GetDealerProducts(ctx context.Context, userID uuid.UUID, pe
 	}
 	var lostRows []lostRow
 	s.DB.Raw(`
-		SELECT COALESCE(interest_product, 'Без товара') AS reason,
+		SELECT COALESCE(NULLIF(disqualify_reason, ''), 'Зависший лид') AS reason,
 			COUNT(*) AS count,
 			COALESCE(SUM(budget), 0) AS lost_revenue
 		FROM leads
-		WHERE salon_id IN ? AND created_at BETWEEN ? AND ?
-			AND status NOT IN ?
-		GROUP BY interest_product
-	`, salonIDs, startDate, endDate, []string{"sale", "paid"}).Scan(&lostRows)
+		WHERE salon_id IN ?
+			AND status NOT IN ('sale', 'paid')
+			AND (
+				(disqualify_reason IS NOT NULL AND disqualify_reason != '')
+				OR created_at < NOW() - INTERVAL '60 days'
+			)
+		GROUP BY COALESCE(NULLIF(disqualify_reason, ''), 'Зависший лид')
+	`, salonIDs).Scan(&lostRows)
+	resp.LostSales = []models.LostSaleItem{}
 	totalLost := 0.0
 	for _, r := range lostRows {
 		totalLost += r.LostRevenue
@@ -1850,6 +1944,52 @@ func (s *KPIService) GetDealerProducts(ctx context.Context, userID uuid.UUID, pe
 		})
 	}
 
+	// Lost Sales by Category - группировка по категории товара
+	type catRow struct {
+		Category    string
+		Count       int64
+		LostRevenue float64
+	}
+	var catRows []catRow
+	s.DB.Raw(`
+		SELECT
+			CASE
+				WHEN interest_product LIKE 'Кухня%' THEN 'Кухни'
+				WHEN interest_product LIKE 'Диван%' OR interest_product LIKE 'Кресло%' THEN 'Мягкая'
+				WHEN interest_product LIKE 'Шкаф%' OR interest_product LIKE 'Стол%' OR interest_product LIKE 'Стенка%' THEN 'Корпусная'
+				WHEN interest_product LIKE 'Матрас%' THEN 'Матрасы'
+				ELSE 'Без категории'
+			END AS category,
+			COUNT(*) AS count,
+			COALESCE(SUM(budget), 0) AS lost_revenue
+		FROM leads
+		WHERE salon_id IN ?
+			AND status NOT IN ('sale', 'paid')
+			AND (
+				(disqualify_reason IS NOT NULL AND disqualify_reason != '')
+				OR created_at < NOW() - INTERVAL '60 days'
+			)
+		GROUP BY category
+		ORDER BY lost_revenue DESC
+	`, salonIDs).Scan(&catRows)
+	resp.LostSalesByCategory = []models.LostSalesCategoryItem{}
+	totalCatLost := 0.0
+	for _, r := range catRows {
+		totalCatLost += r.LostRevenue
+	}
+	for _, r := range catRows {
+		pct := 0.0
+		if totalCatLost > 0 {
+			pct = (r.LostRevenue / totalCatLost) * 100
+		}
+		resp.LostSalesByCategory = append(resp.LostSalesByCategory, models.LostSalesCategoryItem{
+			Category:    r.Category,
+			Count:       int(r.Count),
+			LostRevenue: r.LostRevenue,
+			Percent:     pct,
+		})
+	}
+
 	// Returns - запросы на возврат от дилера
 	type reqRow struct {
 		ID          uuid.UUID
@@ -1857,6 +1997,7 @@ func (s *KPIService) GetDealerProducts(ctx context.Context, userID uuid.UUID, pe
 		Description string
 		Amount      float64
 		Status      string
+		Reason      string
 	}
 	var reqRows []reqRow
 	s.DB.Model(&models.DealerRequest{}).
@@ -1878,9 +2019,85 @@ func (s *KPIService) GetDealerProducts(ctx context.Context, userID uuid.UUID, pe
 			ID:      r.ID.String(),
 			Date:    r.CreatedAt.Format("2006-01-02"),
 			Product: r.Description,
-			Reason:  "",
+			Reason:  r.Reason,
 			Amount:  r.Amount,
 			Status:  mappedStatus,
+		})
+	}
+
+	// Returns by Category - группировка возвратов по категории товара
+	type retCatRow struct {
+		Category string
+		Count    int64
+		Amount   float64
+	}
+	var retCatRows []retCatRow
+	s.DB.Raw(`
+		SELECT
+			CASE
+				WHEN description LIKE 'Кухня%' THEN 'Кухни'
+				WHEN description LIKE 'Диван%' OR description LIKE 'Кресло%' THEN 'Мягкая'
+				WHEN description LIKE 'Шкаф%' OR description LIKE 'Стол%' OR description LIKE 'Стенка%' THEN 'Корпусная'
+				WHEN description LIKE 'Матрас%' THEN 'Матрасы'
+				ELSE 'Без категории'
+			END AS category,
+			COUNT(*) AS count,
+			COALESCE(SUM(amount), 0) AS amount
+		FROM dealer_requests
+		WHERE dealer_id = ? AND type = 'return'
+		GROUP BY category
+		ORDER BY amount DESC
+	`, userID).Scan(&retCatRows)
+	resp.ReturnsByCategory = []models.ReturnsCategoryItem{}
+	totalRetCat := 0.0
+	for _, r := range retCatRows {
+		totalRetCat += r.Amount
+	}
+	for _, r := range retCatRows {
+		pct := 0.0
+		if totalRetCat > 0 {
+			pct = (r.Amount / totalRetCat) * 100
+		}
+		resp.ReturnsByCategory = append(resp.ReturnsByCategory, models.ReturnsCategoryItem{
+			Category: r.Category,
+			Count:    int(r.Count),
+			Amount:   r.Amount,
+			Percent:  pct,
+		})
+	}
+
+	// Returns by Reason - группировка возвратов по причине
+	type retReasonRow struct {
+		Reason string
+		Count  int64
+		Amount float64
+	}
+	var retReasonRows []retReasonRow
+	s.DB.Raw(`
+		SELECT
+			reason,
+			COUNT(*) AS count,
+			COALESCE(SUM(amount), 0) AS amount
+		FROM dealer_requests
+		WHERE dealer_id = ? AND type = 'return' AND reason IS NOT NULL AND reason != ''
+		GROUP BY reason
+		ORDER BY amount DESC
+	`, userID).Scan(&retReasonRows)
+	resp.ReturnsByReason = []models.ReturnsReasonItem{}
+	totalRetReason := 0.0
+	for _, r := range retReasonRows {
+		totalRetReason += r.Amount
+	}
+	for _, r := range retReasonRows {
+		pct := 0.0
+		if totalRetReason > 0 {
+			pct = (r.Amount / totalRetReason) * 100
+		}
+		resp.ReturnsByReason = append(resp.ReturnsByReason, models.ReturnsReasonItem{
+			Reason:  r.Reason,
+			Count:   int(r.Count),
+			Amount:  r.Amount,
+			Percent: pct,
 		})
 	}
 
@@ -3032,6 +3249,36 @@ func (s *KPIService) UpdateDealerTask(ctx context.Context, userID, taskID, statu
 	`, status, taskID, userID).Error
 }
 
+// GetDealerInteractions - взаимодействия дилера с брендом
+func (s *KPIService) GetDealerInteractions(ctx context.Context, dealerID uuid.UUID) ([]models.DealerInteractionItem, error) {
+	type interactionRow struct {
+		models.TerritoryInteraction
+		ManagerName string
+	}
+	var rows []interactionRow
+	s.DB.Raw(`
+		SELECT ti.*, COALESCE(u.first_name || ' ' || u.last_name, 'Менеджер') AS manager_name
+		FROM territory_interactions ti
+		LEFT JOIN users u ON u.id = ti.created_by
+		WHERE ti.dealer_id = ?
+		ORDER BY ti.date DESC
+		LIMIT 50
+	`, dealerID).Scan(&rows)
+
+	result := make([]models.DealerInteractionItem, 0, len(rows))
+	for _, r := range rows {
+		result = append(result, models.DealerInteractionItem{
+			ID:          r.ID.String(),
+			Date:        r.Date.Format("02.01.2006"),
+			Type:        r.Type,
+			Summary:     r.Description,
+			Result:      r.Result,
+			ManagerName: r.ManagerName,
+		})
+	}
+	return result, nil
+}
+
 // GetDealerDetails - детализация дилера (preview-режим для менеджера/франчайзера)
 // managerID - ID менеджера, который запрашивает (для проверки прав и фильтрации по его территории)
 func (s *KPIService) GetDealerDetails(ctx context.Context, managerID, dealerID uuid.UUID) (*models.DealerDetailsResponse, error) {
@@ -3195,7 +3442,7 @@ func (s *KPIService) GetDealerRequests(ctx context.Context, userID uuid.UUID, st
 		CreatedAt   time.Time `json:"created_at"`
 	}
 	
-	query := "SELECT id, type, description, amount, status, created_at FROM dealer_requests WHERE dealer_id = ?"
+	query := "SELECT id, dealer_id, type, description, amount, status, created_at FROM dealer_requests WHERE dealer_id = ?"
 	args := []interface{}{userID.String()}
 	
 	if statusFilter != "" {
@@ -3274,7 +3521,48 @@ func (s *KPIService) GetDealerMarketingBudget(ctx context.Context, userID uuid.U
 	if resp.TotalAmount > 0 {
 		resp.UsagePercent = int((resp.UsedAmount / resp.TotalAmount) * 100)
 	}
-	
+
+	// Парсим квартал для фильтрации expenses
+	resp.Items = []models.DealerBudgetItem{}
+	var periodStart, periodEnd string
+	if parts := strings.Split(quarter, "-Q"); len(parts) == 2 {
+		year := parts[0]
+		qNum := 0
+		fmt.Sscanf(parts[1], "%d", &qNum)
+		if qNum >= 1 && qNum <= 4 {
+			startMonth := fmt.Sprintf("%02d", (qNum-1)*3+1)
+			endMonth := fmt.Sprintf("%02d", qNum*3)
+			periodStart = year + "-" + startMonth
+			periodEnd = year + "-" + endMonth
+		}
+	}
+	if periodStart != "" && periodEnd != "" {
+		type expRow struct {
+			ID          uuid.UUID
+			Period      string
+			Description string
+			Amount      float64
+		}
+		var expRows []expRow
+		s.DB.Raw(`
+			SELECT id, period, COALESCE(description, '') AS description, amount
+			FROM dealer_expenses
+			WHERE dealer_id = ? AND category = 'marketing'
+			  AND period >= ? AND period <= ?
+			ORDER BY period DESC
+		`, userID, periodStart, periodEnd).Scan(&expRows)
+		for _, r := range expRows {
+			status := "approved"
+			resp.Items = append(resp.Items, models.DealerBudgetItem{
+				ID:      r.ID.String(),
+				Date:    r.Period,
+				Purpose: r.Description,
+				Amount:  r.Amount,
+				Status:  status,
+			})
+		}
+	}
+
 	return resp, nil
 }
 

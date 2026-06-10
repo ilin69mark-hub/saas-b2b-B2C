@@ -56,6 +56,7 @@ func runMigrations(db *gorm.DB) error {
 		migrateTenants,
 		migrateSalons,
 		migrateOrders,
+		migrateContracts,
 		migrateTasks,
 		migrateChecklists,
 		migratePlans,
@@ -76,6 +77,7 @@ func runMigrations(db *gorm.DB) error {
 		migrateDealerExpenses,
 		migrateUnitTemplates,
 		migrateProductInventory,
+		migratePromotions,
 	}
 
 	for _, m := range migrations {
@@ -166,6 +168,9 @@ func migrateTenants(db *gorm.DB) error {
 	db.Exec(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`)
 	// Сделать plan_id nullable без constraint
 	db.Exec(`ALTER TABLE tenants ALTER COLUMN plan_id DROP NOT NULL`)
+	db.Exec(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS target_conversion NUMERIC(5,2) DEFAULT 30`)
+	db.Exec(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS target_extras_percent NUMERIC(5,2) DEFAULT 15`)
+	db.Exec(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS max_bonus NUMERIC(12,2) DEFAULT 50000`)
 	return nil
 }
 
@@ -183,7 +188,7 @@ func migrateSalons(db *gorm.DB) error {
 }
 
 func migrateOrders(db *gorm.DB) error {
-	return db.Exec(`
+	if err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS orders (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			user_id UUID NOT NULL,
@@ -191,6 +196,37 @@ func migrateOrders(db *gorm.DB) error {
 			salon_id UUID,
 			total DECIMAL(10,2) DEFAULT 0,
 			status VARCHAR(50) DEFAULT 'pending',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`).Error; err != nil {
+		return err
+	}
+	db.Exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_extra BOOLEAN DEFAULT false")
+	return nil
+}
+
+func migrateContracts(db *gorm.DB) error {
+	return db.Exec(`
+		CREATE TABLE IF NOT EXISTS contracts (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			salon_id UUID NOT NULL,
+			lead_id UUID,
+			manager_id UUID NOT NULL,
+			client_name VARCHAR(255) NOT NULL,
+			client_phone VARCHAR(50),
+			client_email VARCHAR(255),
+			total_amount DECIMAL(12,2) DEFAULT 0,
+			prepaid_amount DECIMAL(12,2) DEFAULT 0,
+			paid_amount DECIMAL(12,2) DEFAULT 0,
+			remain_amount DECIMAL(12,2) DEFAULT 0,
+			margin_percent DECIMAL(5,2) DEFAULT 0,
+			status VARCHAR(50) DEFAULT 'pending',
+			payment_status VARCHAR(50) DEFAULT 'awaiting_payment',
+			payment_date TIMESTAMP,
+			deadline_date TIMESTAMP,
+			products TEXT,
+			description TEXT,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
@@ -404,6 +440,9 @@ func migrateGoals(db *gorm.DB) error {
 	db.Exec(`ALTER TABLE goals ADD COLUMN IF NOT EXISTS tenant_id UUID`)
 	db.Exec(`ALTER TABLE goals ADD COLUMN IF NOT EXISTS assigner_id UUID`)
 	db.Exec(`ALTER TABLE goals ALTER COLUMN assigner_id DROP NOT NULL`)
+	db.Exec(`ALTER TABLE goals ADD COLUMN IF NOT EXISTS target_conversion NUMERIC(5,2) DEFAULT 0`)
+	db.Exec(`ALTER TABLE goals ADD COLUMN IF NOT EXISTS target_extras_percent NUMERIC(5,2) DEFAULT 0`)
+	db.Exec(`ALTER TABLE goals ADD COLUMN IF NOT EXISTS max_bonus NUMERIC(12,2) DEFAULT 0`)
 	return nil
 }
 
@@ -547,6 +586,29 @@ func migrateProductInventory(db *gorm.DB) error {
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
 	`).Error
+}
+
+func migratePromotions(db *gorm.DB) error {
+	if err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS promotions (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id UUID NOT NULL,
+			dealer_id UUID NOT NULL,
+			name VARCHAR(255) NOT NULL,
+			condition TEXT,
+			discount_min INT DEFAULT 0,
+			discount_max INT DEFAULT 0,
+			start_date DATE,
+			end_date DATE,
+			is_active BOOLEAN DEFAULT true,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`).Error; err != nil {
+		return err
+	}
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_promotions_tenant ON promotions(tenant_id)")
+	return nil
 }
 
 func GetDB() *gorm.DB {

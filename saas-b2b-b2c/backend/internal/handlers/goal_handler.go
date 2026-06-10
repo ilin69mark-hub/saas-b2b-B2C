@@ -18,7 +18,7 @@ func NewGoalHandler(s services.GoalService) *GoalHandler {
 	return &GoalHandler{svc: s}
 }
 
-// POST /goals – создать/обновить цель
+// POST /goals – создать цель
 func (h *GoalHandler) SetGoal(c *gin.Context) {
 	var dto services.CreateGoalDTO
 	if err := c.ShouldBindJSON(&dto); err != nil {
@@ -101,6 +101,26 @@ func (h *GoalHandler) DeleteGoal(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// PUT /goals/upsert – создать или обновить цель на период
+func (h *GoalHandler) UpsertGoal(c *gin.Context) {
+	var dto services.CreateGoalDTO
+	if err := c.ShouldBindJSON(&dto); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	assignerID, _ := c.Get("userID")
+	userRole, _ := c.Get("role")
+	tenantID, _ := c.Get("tenantID")
+
+	ctx := context.WithValue(c.Request.Context(), "role", userRole)
+	goal, err := h.svc.UpsertGoal(ctx, dto, assignerID.(string), tenantID.(string))
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, goal)
 }
 
 // PUT /goals/:id – обновить цель

@@ -312,16 +312,24 @@ func (h *KPIHandler) GetTopBar(c *gin.Context) {
 	}
 
 	resp := TopBarResponse{
-		SalonName: "Мой салон",
 		PlanPercent: 0,
 		AvgCheck: 0,
 		PrepaymentsSum: 0,
 		AlertsCount: 0,
 	}
 
+	// Название салона из БД
+	resp.SalonName = "Мой салон"
+	if user.SalonID != nil {
+		var name string
+		h.db.Model(&models.Salon{}).Where("id = ?", *user.SalonID).Select("name").Scan(&name)
+		if name != "" {
+			resp.SalonName = name
+		}
+	}
+
 	data, err := h.kpiSvc.GetDashboardMain(c.Request.Context(), user.ID, time.Now().Format("2006-01-02"))
 	if err == nil {
-		resp.SalonName = "Салон №1"
 		resp.PlanPercent = data.PlanPercent
 		resp.AvgCheck = data.AvgCheck
 		resp.PrepaymentsSum = data.PrepaymentsSum
@@ -1151,6 +1159,21 @@ func (h *KPIHandler) CreateDealerRequest(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"message": "Request created"})
+}
+
+// GetDealerInteractions - получить историю взаимодействий дилера
+func (h *KPIHandler) GetDealerInteractions(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+	data, err := h.kpiSvc.GetDealerInteractions(c.Request.Context(), user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, data)
 }
 
 // === Dealer Marketing Budget Handlers ===
