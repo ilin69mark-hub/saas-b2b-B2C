@@ -53,8 +53,8 @@ const GreetingOverlay: React.FC<GreetingOverlayProps> = ({ firstName, lastName, 
   }, [onComplete]);
 
   useEffect(() => {
-    const fadeTimer = setTimeout(() => setFadingOut(true), 1700);
-    const doneTimer = setTimeout(handleComplete, 2200);
+    const fadeTimer = setTimeout(() => setFadingOut(true), 6000);
+    const doneTimer = setTimeout(handleComplete, 7000);
     return () => {
       clearTimeout(fadeTimer);
       clearTimeout(doneTimer);
