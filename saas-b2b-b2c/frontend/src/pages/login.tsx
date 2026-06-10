@@ -55,6 +55,8 @@ const LoginPage: React.FC = () => {
         login({ email: values.email, password: values.password })
       ).unwrap(); // <-- теперь типы работают без ошибок
 
+      sessionStorage.setItem('showGreeting', 'true');
+
       const role = result.user?.role;
 
       if (role === 'super_admin') {

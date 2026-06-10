@@ -11,6 +11,7 @@ import dayjs from 'dayjs';
 import 'dayjs/locale/ru';
 import weekday from 'dayjs/plugin/weekday';
 import localeData from 'dayjs/plugin/localeData';
+import GreetingOverlay from '../components/GreetingOverlay/GreetingOverlay';
 
 dayjs.locale('ru');
 dayjs.extend(weekday);
@@ -18,6 +19,8 @@ dayjs.extend(localeData);
 
 function MyApp({ Component, pageProps }: AppProps) {
   const [showChild, setShowChild] = useState(false);
+  const [showGreeting, setShowGreeting] = useState(false);
+  const [greetingUser, setGreetingUser] = useState({ firstName: '', lastName: '' });
 
   useEffect(() => {
     const token = localStorage.getItem('accessToken');
@@ -32,6 +35,20 @@ function MyApp({ Component, pageProps }: AppProps) {
         console.error('Failed to parse user', e);
       }
     }
+
+    // Проверяем флаг свежего логина
+    const justLoggedIn = typeof window !== 'undefined' && sessionStorage.getItem('showGreeting') === 'true';
+    if (justLoggedIn) {
+      sessionStorage.removeItem('showGreeting');
+      try {
+        const u = JSON.parse(userStr || '{}');
+        setGreetingUser({ firstName: u.first_name || '', lastName: u.last_name || '' });
+      } catch {
+        // Игнорируем — покажем приветствие без имени
+      }
+      setShowGreeting(true);
+    }
+
     setShowChild(true);
   }, []);
 
@@ -43,7 +60,15 @@ function MyApp({ Component, pageProps }: AppProps) {
     <Provider store={store}>
       <ConfigProvider locale={ruRU}>
         <ThemeProvider>
-          <Component {...pageProps} />
+          {showGreeting ? (
+            <GreetingOverlay
+              firstName={greetingUser.firstName}
+              lastName={greetingUser.lastName}
+              onComplete={() => setShowGreeting(false)}
+            />
+          ) : (
+            <Component {...pageProps} />
+          )}
         </ThemeProvider>
       </ConfigProvider>
     </Provider>
