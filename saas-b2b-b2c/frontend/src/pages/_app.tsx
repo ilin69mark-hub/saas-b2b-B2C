@@ -4,6 +4,7 @@ import type { AppProps } from 'next/app';
 import { Provider } from 'react-redux';
 import { store } from '../store';
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
 import ThemeProvider from '../components/ThemeProvider';
 import { ConfigProvider } from 'antd';
 import ruRU from 'antd/locale/ru_RU';
@@ -21,6 +22,7 @@ function MyApp({ Component, pageProps }: AppProps) {
   const [showChild, setShowChild] = useState(false);
   const [showGreeting, setShowGreeting] = useState(false);
   const [greetingUser, setGreetingUser] = useState({ firstName: '', lastName: '' });
+  const router = useRouter();
 
   useEffect(() => {
     const token = localStorage.getItem('accessToken');
@@ -35,12 +37,17 @@ function MyApp({ Component, pageProps }: AppProps) {
         console.error('Failed to parse user', e);
       }
     }
+    setShowChild(true);
+  }, []);
 
-    // Проверяем флаг свежего логина
-    const justLoggedIn = typeof window !== 'undefined' && sessionStorage.getItem('showGreeting') === 'true';
-    if (justLoggedIn) {
+  useEffect(() => {
+    if (!showChild) return;
+
+    const flag = sessionStorage.getItem('showGreeting');
+    if (flag === 'true') {
       sessionStorage.removeItem('showGreeting');
       try {
+        const userStr = localStorage.getItem('user');
         const u = JSON.parse(userStr || '{}');
         setGreetingUser({ firstName: u.first_name || '', lastName: u.last_name || '' });
       } catch {
@@ -48,9 +55,7 @@ function MyApp({ Component, pageProps }: AppProps) {
       }
       setShowGreeting(true);
     }
-
-    setShowChild(true);
-  }, []);
+  }, [showChild, router.asPath]);
 
   if (!showChild) {
     return null;
@@ -60,14 +65,13 @@ function MyApp({ Component, pageProps }: AppProps) {
     <Provider store={store}>
       <ConfigProvider locale={ruRU}>
         <ThemeProvider>
-          {showGreeting ? (
+          <Component {...pageProps} />
+          {showGreeting && (
             <GreetingOverlay
               firstName={greetingUser.firstName}
               lastName={greetingUser.lastName}
               onComplete={() => setShowGreeting(false)}
             />
-          ) : (
-            <Component {...pageProps} />
           )}
         </ThemeProvider>
       </ConfigProvider>
