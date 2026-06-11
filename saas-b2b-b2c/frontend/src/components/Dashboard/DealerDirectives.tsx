@@ -194,6 +194,7 @@ const DealerDirectives: React.FC<DealerDirectivesProps> = ({ user }) => {
                 const now = dayjs();
                 const active = data?.promotions?.filter(p => dayjs(p.start_date).isBefore(now) && dayjs(p.end_date).isAfter(now)) || [];
                 const upcoming = data?.promotions?.filter(p => dayjs(p.start_date).isAfter(now)) || [];
+                const past = data?.promotions?.filter(p => dayjs(p.end_date).isBefore(now)) || [];
 
                 const renderPromo = (promo: Promotion, color: string) => (
                   <div key={promo.id} style={{ marginBottom: 12, padding: 8, background: promo.is_expiring ? '#fff7e6' : `${color}08`, borderRadius: 4, borderLeft: promo.is_expiring ? '3px solid #faad14' : `3px solid ${color}` }}>
@@ -234,6 +235,34 @@ const DealerDirectives: React.FC<DealerDirectivesProps> = ({ user }) => {
                       <>
                         <div style={{ marginTop: 12 }}><Text strong style={{ color: '#1890ff' }}>● Скоро</Text></div>
                         {upcoming.map(p => renderPromo(p, '#1890ff'))}
+                      </>
+                    )}
+                    {past.length > 0 && (
+                      <>
+                        <div style={{ marginTop: 16, marginBottom: 8 }}><Text strong style={{ color: '#999' }}>● Завершённые</Text></div>
+                        {past.map(p => (
+                          <div key={p.id} style={{ marginBottom: 12, padding: 8, background: '#f5f5f5', borderRadius: 4, borderLeft: '3px solid #d9d9d9' }}>
+                            <Row justify="space-between" align="middle">
+                              <Col>
+                                <Text strong style={{ color: '#999' }}>{p.name}</Text>
+                                <br />
+                                <Text type="secondary" style={{ color: '#bbb' }}>{p.condition}</Text>
+                              </Col>
+                              <Col>
+                                <Tag color="default" style={{ opacity: 0.5 }}>
+                                  {p.discount_min === p.discount_max
+                                    ? `${p.discount_min}%`
+                                    : `${p.discount_min}-${p.discount_max}%`}
+                                </Tag>
+                                <div style={{ textAlign: 'right', marginTop: 4 }}>
+                                  <Text type="secondary" style={{ fontSize: 12 }}>
+                                    до {dayjs(p.end_date).format('DD.MM.YYYY')}
+                                  </Text>
+                                </div>
+                              </Col>
+                            </Row>
+                          </div>
+                        ))}
                       </>
                     )}
                   </>
