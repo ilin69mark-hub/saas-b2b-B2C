@@ -194,7 +194,6 @@ const DealerDirectives: React.FC<DealerDirectivesProps> = ({ user }) => {
                 const now = dayjs();
                 const active = data?.promotions?.filter(p => dayjs(p.start_date).isBefore(now) && dayjs(p.end_date).isAfter(now)) || [];
                 const upcoming = data?.promotions?.filter(p => dayjs(p.start_date).isAfter(now)) || [];
-                const past = data?.promotions?.filter(p => dayjs(p.end_date).isBefore(now)) || [];
 
                 const renderPromo = (promo: Promotion, color: string) => (
                   <div key={promo.id} style={{ marginBottom: 12, padding: 8, background: promo.is_expiring ? '#fff7e6' : `${color}08`, borderRadius: 4, borderLeft: promo.is_expiring ? '3px solid #faad14' : `3px solid ${color}` }}>
@@ -235,12 +234,6 @@ const DealerDirectives: React.FC<DealerDirectivesProps> = ({ user }) => {
                       <>
                         <div style={{ marginTop: 12 }}><Text strong style={{ color: '#1890ff' }}>● Скоро</Text></div>
                         {upcoming.map(p => renderPromo(p, '#1890ff'))}
-                      </>
-                    )}
-                    {past.length > 0 && (
-                      <>
-                        <div style={{ marginTop: 12 }}><Text strong style={{ color: '#999' }}>● Завершённые</Text></div>
-                        {past.map(p => renderPromo(p, '#999'))}
                       </>
                     )}
                   </>
