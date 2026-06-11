@@ -404,13 +404,17 @@ type SalonPlanData struct {
 
 // ManagerStatsData - статистика по менеджеру
 type ManagerStatsData struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Salon       string  `json:"salon"`
-	SalonID     string  `json:"salon_id"`
-	Revenue     float64 `json:"revenue"`
-	PlanPercent float64 `json:"planPercent"`
-	Conversion  float64 `json:"conversion"`
+	ID                  string  `json:"id"`
+	Name                string  `json:"name"`
+	Salon               string  `json:"salon"`
+	SalonID             string  `json:"salon_id"`
+	Revenue             float64 `json:"revenue"`
+	PlanPercent         float64 `json:"planPercent"`
+	Conversion          float64 `json:"conversion"`
+	SalesPlan           float64 `json:"sales_plan"`
+	TargetConversion    float64 `json:"target_conversion"`
+	TargetExtrasPercent float64 `json:"target_extras_percent"`
+	MaxBonus            float64 `json:"max_bonus"`
 }
 
 // BenchmarkPoint - точка сравнения конверсии

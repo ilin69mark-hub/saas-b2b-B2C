@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Card, Row, Col, Progress, Typography, Table, Tag, Button, Space, Select, Radio, Collapse, Statistic, Empty, Spin, Alert, DatePicker, Modal, InputNumber, message } from 'antd';
+import { Card, Row, Col, Progress, Typography, Table, Tag, Button, Space, Select, Radio, Collapse, Statistic, Empty, Spin, Alert, DatePicker, Modal, InputNumber, message, Divider } from 'antd';
 import { TrophyOutlined, WarningOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import apiClient from '@/api/axiosClient';
@@ -35,6 +35,10 @@ interface ManagerStats {
   revenue: number;
   planPercent: number;
   conversion: number;
+  sales_plan: number;
+  target_conversion: number;
+  target_extras_percent: number;
+  max_bonus: number;
 }
 
 interface BenchmarkPoint {
@@ -123,6 +127,14 @@ const FunnelPlanTab: React.FC = () => {
   const antiTopManagers = useMemo(() => {
     return [...managerStats].sort((a, b) => a.conversion - b.conversion).slice(0, 3);
   }, [managerStats]);
+
+  const managerGoalColumns = [
+    { title: 'Менеджер', dataIndex: 'name', key: 'name' },
+    { title: 'План продаж', dataIndex: 'sales_plan', key: 'sales_plan', render: (v: number) => v ? `${v.toLocaleString()} ₽` : '—' },
+    { title: 'Целевая конверсия', dataIndex: 'target_conversion', key: 'target_conversion', render: (v: number) => v ? `${v}%` : '—' },
+    { title: 'Доля допов', dataIndex: 'target_extras_percent', key: 'target_extras_percent', render: (v: number) => v ? `${v}%` : '—' },
+    { title: 'Макс. премия', dataIndex: 'max_bonus', key: 'max_bonus', render: (v: number) => v ? `${v.toLocaleString()} ₽` : '—' },
+  ];
 
   const getForecastIcon = (forecast: 'green' | 'yellow' | 'red') => {
     const icons = { green: '🟢', yellow: '🟡', red: '🔴' };
@@ -415,18 +427,32 @@ const FunnelPlanTab: React.FC = () => {
                           <Text strong>{salon.avgCheck.toLocaleString()} ₽</Text>
                         </Col>
                       </Row>
-                      <Row style={{ marginTop: 12 }}>
-                        <Col>
-                          <Button
-                            type="primary"
-                            icon={<SettingOutlined />}
+
+                      {salon.managersCount > 0 && (
+                        <>
+                          <Divider orientation="left" style={{ fontSize: 14 }}>
+                            Планы менеджеров
+                          </Divider>
+                          <Table
+                            dataSource={managerStats.filter((m) => m.salon_id === salon.id)}
+                            columns={managerGoalColumns}
+                            rowKey="id"
+                            pagination={false}
                             size="small"
-                            onClick={() => openPlanModal(salon.id, salon.name)}
-                          >
-                            Назначить план
-                          </Button>
-                        </Col>
-                      </Row>
+                            locale={{ emptyText: 'Нет данных' }}
+                          />
+                        </>
+                      )}
+
+                      <Divider />
+                      <Button
+                        type="primary"
+                        icon={<SettingOutlined />}
+                        size="small"
+                        onClick={() => openPlanModal(salon.id, salon.name)}
+                      >
+                        Назначить план
+                      </Button>
                     </div>
                   ),
                 }))}

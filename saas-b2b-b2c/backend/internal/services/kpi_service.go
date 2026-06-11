@@ -1641,12 +1641,19 @@ func (s *KPIService) GetDealerFunnel(ctx context.Context, userID uuid.UUID, peri
 			Scan(&revenues)
 
 		type mgrGoal struct {
-			AssigneeID uuid.UUID
-			Plan       float64
+			AssigneeID          uuid.UUID
+			SalesPlan           float64
+			TargetConversion    float64
+			TargetExtrasPercent float64
+			MaxBonus            float64
 		}
 		var mgrGoals []mgrGoal
 		s.DB.Model(&models.Goal{}).
-			Select("assignee_id, COALESCE(SUM(sales_plan), 0) as plan").
+			Select(`assignee_id,
+				COALESCE(SUM(sales_plan), 0) as sales_plan,
+				COALESCE(MAX(target_conversion), 0) as target_conversion,
+				COALESCE(MAX(target_extras_percent), 0) as target_extras_percent,
+				COALESCE(MAX(max_bonus), 0) as max_bonus`).
 			Where("assignee_id IN ? AND target_date BETWEEN ? AND ?", allManagerIDs, startDate, endDate).
 			Group("assignee_id").
 			Scan(&mgrGoals)
@@ -1656,8 +1663,15 @@ func (s *KPIService) GetDealerFunnel(ctx context.Context, userID uuid.UUID, peri
 			revenueMap[r.UserID.String()] = r.Revenue
 		}
 		planMap := make(map[string]float64)
+		targetConvMap := make(map[string]float64)
+		targetExtrasMap := make(map[string]float64)
+		maxBonusMap := make(map[string]float64)
 		for _, g := range mgrGoals {
-			planMap[g.AssigneeID.String()] = g.Plan
+			uid := g.AssigneeID.String()
+			planMap[uid] = g.SalesPlan
+			targetConvMap[uid] = g.TargetConversion
+			targetExtrasMap[uid] = g.TargetExtrasPercent
+			maxBonusMap[uid] = g.MaxBonus
 		}
 
 		for _, row := range managerRows {
@@ -1684,13 +1698,17 @@ func (s *KPIService) GetDealerFunnel(ctx context.Context, userID uuid.UUID, peri
 			}
 
 			resp.ManagerStats = append(resp.ManagerStats, models.ManagerStatsData{
-				ID:          uid,
-				Name:        row.Name,
-				Salon:       row.Salon,
-				SalonID:     row.SalonID,
-				Revenue:     rev,
-				PlanPercent: planPct,
-				Conversion:  conv,
+				ID:                  uid,
+				Name:                row.Name,
+				Salon:               row.Salon,
+				SalonID:             row.SalonID,
+				Revenue:             rev,
+				PlanPercent:         planPct,
+				Conversion:          conv,
+				SalesPlan:           p,
+				TargetConversion:    targetConvMap[uid],
+				TargetExtrasPercent: targetExtrasMap[uid],
+				MaxBonus:            maxBonusMap[uid],
 			})
 		}
 	}
