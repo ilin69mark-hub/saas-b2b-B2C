@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import {
@@ -29,6 +29,7 @@ import Link from 'next/link';
 import { RootState } from '@/store';
 import { useGetMyProfileQuery, useUpdateProfileMutation } from '@/services/userApi';
 import type { UpdateProfileRequest } from '@/types';
+import { updateUser } from '@/store/authSlice';
 import PhoneInput from '@/components/common/PhoneInput';
 import { normalizeForApi } from '@/utils/phone';
 
@@ -46,6 +47,7 @@ const STATUS_OPTIONS = [
 
 const ProfilePage: React.FC = () => {
   const router = useRouter();
+  const dispatch = useDispatch();
   const { isAuthenticated } = useSelector((state: RootState) => state.auth);
 
   useEffect(() => {
@@ -89,7 +91,8 @@ const ProfilePage: React.FC = () => {
 
   const handleMainSave = async (values: Record<string, unknown>) => {
     try {
-      await updateProfile(values as UpdateProfileRequest).unwrap();
+      const result = await updateProfile(values as UpdateProfileRequest).unwrap();
+      dispatch(updateUser(result));
       message.success('Профиль сохранён');
     } catch {
       message.error('Ошибка сохранения профиля');
@@ -106,7 +109,8 @@ const ProfilePage: React.FC = () => {
         contacts_whatsapp: normalizeForApi(String(values.whatsapp || '')),
         contacts_working_hours: values.working_hours,
       };
-      await updateProfile(flatData as unknown as UpdateProfileRequest).unwrap();
+      const result = await updateProfile(flatData as unknown as UpdateProfileRequest).unwrap();
+      dispatch(updateUser(result));
       message.success('Контакты сохранены');
     } catch {
       message.error('Ошибка сохранения контактов');
@@ -115,7 +119,8 @@ const ProfilePage: React.FC = () => {
 
   const handleStatusChange = async (changedValues: Record<string, unknown>) => {
     try {
-      await updateProfile(changedValues as UpdateProfileRequest).unwrap();
+      const result = await updateProfile(changedValues as UpdateProfileRequest).unwrap();
+      dispatch(updateUser(result));
     } catch {
       message.error('Ошибка обновления статуса');
     }

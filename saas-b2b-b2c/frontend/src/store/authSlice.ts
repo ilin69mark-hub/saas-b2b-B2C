@@ -70,6 +70,14 @@ const authSlice = createSlice({
         localStorage.removeItem('reduxState');
       }
     },
+    updateUser: (state, action) => {
+      if (state.user) {
+        Object.assign(state.user, action.payload);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('user', JSON.stringify(state.user));
+        }
+      }
+    },
     setAuthFromStorage: (state) => {
       if (typeof window !== 'undefined') {
         const token = localStorage.getItem('accessToken');
@@ -168,5 +176,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { logout, setAuthFromStorage } = authSlice.actions;
+export const { logout, setAuthFromStorage, updateUser } = authSlice.actions;
 export default authSlice.reducer;
