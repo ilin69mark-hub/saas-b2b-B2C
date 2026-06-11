@@ -356,8 +356,8 @@ func ResetAndSeedData(db *gorm.DB) error {
 			plan := roundVal(basePlan * (0.8 + rng.Float64()*0.4))
 			fact := roundVal(plan * (0.7 + rng.Float64()*0.4))
 			dateStr := m.Format("2006-01-02")
-			db.Exec(`INSERT INTO goals (id, assignee_id, role, sales_plan, sales_fact, target_date, status, period, tenant_id, assigner_id)
-				VALUES ($1, $2, $3, $4, $5, $6, 'active', 'month', $7, $8)`,
+			db.Exec(`INSERT INTO goals (id, assignee_id, role, sales_plan, sales_fact, target_date, status, period, tenant_id, assigner_id, target_conversion, target_extras_percent, max_bonus)
+				VALUES ($1, $2, $3, $4, $5, $6, 'active', 'month', $7, $8, 30, 15, 50000)`,
 				uuid.New().String(), mgr.ID, "franchiser_manager", plan, fact, dateStr, franchiser.TenantID, franchiser.ID)
 			goalCount++
 		}
@@ -369,8 +369,8 @@ func ResetAndSeedData(db *gorm.DB) error {
 			plan := roundVal(basePlan * (0.8 + rng.Float64()*0.4))
 			fact := roundVal(plan * (0.7 + rng.Float64()*0.4))
 			dateStr := m.Format("2006-01-02")
-			db.Exec(`INSERT INTO goals (id, assignee_id, role, sales_plan, sales_fact, target_date, status, period, tenant_id, assigner_id)
-				VALUES ($1, $2, $3, $4, $5, $6, 'active', 'month', $7, $8)`,
+			db.Exec(`INSERT INTO goals (id, assignee_id, role, sales_plan, sales_fact, target_date, status, period, tenant_id, assigner_id, target_conversion, target_extras_percent, max_bonus)
+				VALUES ($1, $2, $3, $4, $5, $6, 'active', 'month', $7, $8, 30, 15, 50000)`,
 				uuid.New().String(), d.ID, "dealer", plan, fact, dateStr, franchiser.TenantID, d.ManagerID)
 			goalCount++
 		}
@@ -387,8 +387,8 @@ func ResetAndSeedData(db *gorm.DB) error {
 			plan := roundVal(basePlan * (0.8 + rng.Float64()*0.4))
 			fact := roundVal(plan * (0.7 + rng.Float64()*0.4))
 			dateStr := m.Format("2006-01-02")
-			db.Exec(`INSERT INTO goals (id, assignee_id, role, sales_plan, sales_fact, target_date, status, period, tenant_id, assigner_id)
-				VALUES ($1, $2, $3, $4, $5, $6, 'active', 'month', $7, $8)`,
+			db.Exec(`INSERT INTO goals (id, assignee_id, role, sales_plan, sales_fact, target_date, status, period, tenant_id, assigner_id, target_conversion, target_extras_percent, max_bonus)
+				VALUES ($1, $2, $3, $4, $5, $6, 'active', 'month', $7, $8, 30, 15, 50000)`,
 				uuid.New().String(), sm.ID, "salon_manager", plan, fact, dateStr, franchiser.TenantID, franchiser.ID)
 			goalCount++
 		}
