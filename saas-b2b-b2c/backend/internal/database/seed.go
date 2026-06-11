@@ -253,33 +253,40 @@ func ResetAndSeedData(db *gorm.DB) error {
 
 	// 4b. Create promotions for each dealer
 	log.Println("Creating promotions...")
-	promotionTemplates := []struct {
+	type promoDef struct {
 		Name      string
 		Condition string
-		Min, Max  int
-	}{
-		{"Летняя распродажа", "При покупке дивана — кресло в подарок", 10, 25},
-		{"Комплект со скидкой", "Мебель + услуги дизайнера", 15, 30},
-		{"Акция выходного дня", "Скидка 20% в субботу и воскресенье", 20, 20},
-		{"Новоселье", "Скидка 10% при заказе от 200 000 ₽", 10, 15},
-		{"Сезонное предложение", "Кухни со скидкой до 35%", 20, 35},
-		{"Счастливый час", "Скидка 15% с 10 до 12 часов", 15, 15},
+		Min       int
+		Max       int
+		OffsetMonthsStart int  // months to add to now for start_date
+		OffsetMonthsEnd   int  // months to add to now for end_date
+		IsActive          bool
+	}
+	promoTemplates := []promoDef{
+		// 3 active
+		{"Летняя распродажа",       "При покупке дивана — кресло в подарок",        10, 25, -1, 1, true},
+		{"Комплект со скидкой",     "Мебель + услуги дизайнера",                    15, 30, -2, 2, true},
+		{"Акция выходного дня",     "Скидка 20% в субботу и воскресенье",           20, 20, -1, 1, true},
+		// 2 upcoming (start in ~2 weeks)
+		{"Сезонное предложение",    "Кухни со скидкой до 35%",                      20, 35, 0, 3, true},
+		{"Новоселье",               "Скидка 10% при заказе от 200 000 ₽",           10, 15, 0, 3, true},
+		// 2 past
+		{"Счастливый час",          "Скидка 15% с 10 до 12 часов",                  15, 15, -4, -1, false},
+		{"Счастливые часы",         "Скидка 20% на мягкую мебель",                  20, 25, -3, -1, false},
 	}
 	promoCount := 0
+	now := time.Now()
 	for _, d := range dealers {
-		numPromos := 2 + rng.Intn(3)
-		shuffled := make([]int, len(promotionTemplates))
-		for i := range shuffled {
-			shuffled[i] = i
-		}
-		rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
-		for i := 0; i < numPromos && i < len(shuffled); i++ {
-			t := promotionTemplates[shuffled[i]]
-			startDate := time.Now().AddDate(0, -1, 0)
-			endDate := startDate.AddDate(0, 2, 0)
+		for _, t := range promoTemplates {
+			startDate := time.Date(now.Year(), now.Month()+time.Month(t.OffsetMonthsStart), 1, 0, 0, 0, 0, now.Location())
+			// upcoming: start in 2 weeks from now
+			if t.OffsetMonthsStart == 0 {
+				startDate = now.AddDate(0, 0, 14)
+			}
+			endDate := startDate.AddDate(0, t.OffsetMonthsEnd-t.OffsetMonthsStart, 0)
 			db.Exec(`INSERT INTO promotions (id, tenant_id, dealer_id, name, condition, discount_min, discount_max, start_date, end_date, is_active)
-				VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, true)`,
-				franchiser.TenantID, d.ID, t.Name, t.Condition, t.Min, t.Max, startDate, endDate)
+				VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+				franchiser.TenantID, d.ID, t.Name, t.Condition, t.Min, t.Max, startDate, endDate, t.IsActive)
 			promoCount++
 		}
 	}
@@ -346,8 +353,7 @@ func ResetAndSeedData(db *gorm.DB) error {
 
 	// 7. Create goals for managers and dealers (Jan 2025 - May 2026)
 	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	now := time.Now()
-	end := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
+	end := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
 
 	goalCount := 0
 	for _, mgr := range managers {

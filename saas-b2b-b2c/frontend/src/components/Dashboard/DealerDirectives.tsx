@@ -12,6 +12,7 @@ interface Promotion {
   condition: string;
   discount_min: number;
   discount_max: number;
+  start_date: string;
   end_date: string;
   is_expiring: boolean;
 }
@@ -189,32 +190,62 @@ const DealerDirectives: React.FC<DealerDirectivesProps> = ({ user }) => {
 
             {/* Акции */}
             <Card title="Акции" size="small" style={{ marginBottom: 16 }}>
-              {data?.promotions?.map((promo) => (
-                <div key={promo.id} style={{ marginBottom: 12, padding: 8, background: promo.is_expiring ? '#fff7e6' : 'transparent', borderRadius: 4, borderLeft: promo.is_expiring ? '3px solid #faad14' : '3px solid #52c41a' }}>
-                  <Row justify="space-between" align="middle">
-                    <Col>
-                      <Text strong>{promo.name}</Text>
-                      <br />
-                      <Text type="secondary">{promo.condition}</Text>
-                    </Col>
-                    <Col>
-                      <Tag color={promo.is_expiring ? 'warning' : 'success'}>
-                        {promo.discount_min === promo.discount_max
-                          ? `${promo.discount_min}%`
-                          : `${promo.discount_min}-${promo.discount_max}%`}
-                      </Tag>
-                      {promo.is_expiring && (
-                        <WarningOutlined style={{ color: '#faad14', marginLeft: 4 }} />
-                      )}
-                      <div style={{ textAlign: 'right', marginTop: 4 }}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          До {dayjs(promo.end_date).format('DD MMM')}
-                        </Text>
-                      </div>
-                    </Col>
-                  </Row>
-                </div>
-              ))}
+              {(() => {
+                const now = dayjs();
+                const active = data?.promotions?.filter(p => dayjs(p.start_date).isBefore(now) && dayjs(p.end_date).isAfter(now)) || [];
+                const upcoming = data?.promotions?.filter(p => dayjs(p.start_date).isAfter(now)) || [];
+                const past = data?.promotions?.filter(p => dayjs(p.end_date).isBefore(now)) || [];
+
+                const renderPromo = (promo: Promotion, color: string) => (
+                  <div key={promo.id} style={{ marginBottom: 12, padding: 8, background: promo.is_expiring ? '#fff7e6' : `${color}08`, borderRadius: 4, borderLeft: promo.is_expiring ? '3px solid #faad14' : `3px solid ${color}` }}>
+                    <Row justify="space-between" align="middle">
+                      <Col>
+                        <Text strong>{promo.name}</Text>
+                        <br />
+                        <Text type="secondary">{promo.condition}</Text>
+                      </Col>
+                      <Col>
+                        <Tag color={promo.is_expiring ? 'warning' : 'default'}>
+                          {promo.discount_min === promo.discount_max
+                            ? `${promo.discount_min}%`
+                            : `${promo.discount_min}-${promo.discount_max}%`}
+                        </Tag>
+                        {promo.is_expiring && <WarningOutlined style={{ color: '#faad14', marginLeft: 4 }} />}
+                        <div style={{ textAlign: 'right', marginTop: 4 }}>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {dayjs(promo.start_date).isAfter(now)
+                              ? `с ${dayjs(promo.start_date).format('DD MMM')}`
+                              : `до ${dayjs(promo.end_date).format('DD MMM')}`}
+                          </Text>
+                        </div>
+                      </Col>
+                    </Row>
+                  </div>
+                );
+
+                return (
+                  <>
+                    {active.length > 0 && (
+                      <>
+                        <Text strong style={{ color: '#52c41a' }}>● Активные</Text>
+                        {active.map(p => renderPromo(p, '#52c41a'))}
+                      </>
+                    )}
+                    {upcoming.length > 0 && (
+                      <>
+                        <div style={{ marginTop: 12 }}><Text strong style={{ color: '#1890ff' }}>● Скоро</Text></div>
+                        {upcoming.map(p => renderPromo(p, '#1890ff'))}
+                      </>
+                    )}
+                    {past.length > 0 && (
+                      <>
+                        <div style={{ marginTop: 12 }}><Text strong style={{ color: '#999' }}>● Завершённые</Text></div>
+                        {past.map(p => renderPromo(p, '#999'))}
+                      </>
+                    )}
+                  </>
+                );
+              })()}
             </Card>
 
             {/* Прогноз премии */}

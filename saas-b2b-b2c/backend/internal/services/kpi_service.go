@@ -1080,7 +1080,7 @@ func (s *KPIService) GetManagerTargets(ctx context.Context, userID uuid.UUID, da
 	// === Акции ===
 	if user.TenantID != nil {
 		var dbPromos []models.Promotion
-		s.DB.Where("tenant_id = ? AND is_active = true", user.TenantID).Order("created_at DESC").Find(&dbPromos)
+		s.DB.Where("tenant_id = ?", user.TenantID).Order("start_date DESC").Limit(10).Find(&dbPromos)
 		dtos := make([]models.PromotionDTO, len(dbPromos))
 		for i, p := range dbPromos {
 			dtos[i] = p.ToDTO()

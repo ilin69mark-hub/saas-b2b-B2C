@@ -31,6 +31,10 @@ func (p *Promotion) ToDTO() PromotionDTO {
 	if !p.EndDate.IsZero() && time.Until(p.EndDate).Hours() < 24*7 {
 		isExpiring = true
 	}
+	startDateStr := ""
+	if !p.StartDate.IsZero() {
+		startDateStr = p.StartDate.Format("2006-01-02")
+	}
 	endDateStr := ""
 	if !p.EndDate.IsZero() {
 		endDateStr = p.EndDate.Format("2006-01-02")
@@ -41,6 +45,7 @@ func (p *Promotion) ToDTO() PromotionDTO {
 		Condition:   p.Condition,
 		DiscountMin: p.DiscountMin,
 		DiscountMax: p.DiscountMax,
+		StartDate:   startDateStr,
 		EndDate:     endDateStr,
 		IsExpiring:  isExpiring,
 	}
@@ -53,6 +58,7 @@ type PromotionDTO struct {
 	Condition   string `json:"condition"`
 	DiscountMin int    `json:"discount_min"`
 	DiscountMax int    `json:"discount_max"`
+	StartDate   string `json:"start_date"`
 	EndDate     string `json:"end_date"`
 	IsExpiring  bool   `json:"is_expiring"`
 }
