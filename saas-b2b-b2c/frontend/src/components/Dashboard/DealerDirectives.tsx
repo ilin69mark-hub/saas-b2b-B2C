@@ -239,8 +239,8 @@ const DealerDirectives: React.FC<DealerDirectivesProps> = ({ user }) => {
                     )}
                     {past.length > 0 && (
                       <>
-                        <div style={{ marginTop: 16, marginBottom: 8 }}><Text strong style={{ color: '#999' }}>● Завершённые</Text></div>
-                        {past.map(p => renderPromo(p, '#999'))}
+                        <div style={{ marginTop: 16, marginBottom: 8 }}><Text strong style={{ color: '#999999' }}>● Завершённые</Text></div>
+                        {past.map(p => renderPromo(p, '#999999'))}
                       </>
                     )}
                   </>
