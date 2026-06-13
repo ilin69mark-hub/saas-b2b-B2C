@@ -86,7 +86,7 @@ const SalonTeamTab: React.FC<SalonTeamTabProps> = ({ user }) => {
     fetchHistory(record.user_id);
   };
 
-  const formatMoney = (val: number) => new Intl.NumberFormat('ru-RU').format(val);
+  const formatMoney = (val: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(val);
 
   const DeviationIndicator: React.FC<{ value: number }> = ({ value }) => {
     if (value === 0) return null;

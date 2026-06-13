@@ -57,7 +57,7 @@ func (m *MockLeadRepository) GetLeadActivities(ctx context.Context, leadID uuid.
 
 func TestLeadService_CreateLead_Success(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	user := &models.User{
 		ID:     uuid.New(),
@@ -83,7 +83,7 @@ func TestLeadService_CreateLead_Success(t *testing.T) {
 
 func TestLeadService_CreateLead_NoSalonID(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	user := &models.User{
 		ID:     uuid.New(),
@@ -103,7 +103,7 @@ func TestLeadService_CreateLead_NoSalonID(t *testing.T) {
 
 func TestLeadService_CreateLead_RepoError(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	user := &models.User{
 		ID:     uuid.New(),
@@ -125,7 +125,7 @@ func TestLeadService_CreateLead_RepoError(t *testing.T) {
 
 func TestLeadService_GetMyLeads_Success(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	managerID := uuid.New()
 	expectedLeads := []models.Lead{
@@ -145,7 +145,7 @@ func TestLeadService_GetMyLeads_Success(t *testing.T) {
 
 func TestLeadService_GetMyLeads_Empty(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	managerID := uuid.New()
 
@@ -160,7 +160,7 @@ func TestLeadService_GetMyLeads_Empty(t *testing.T) {
 
 func TestLeadService_GetMyLeads_Error(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	managerID := uuid.New()
 
@@ -176,7 +176,7 @@ func TestLeadService_GetMyLeads_Error(t *testing.T) {
 
 func TestLeadService_UpdateStatus_Success(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	managerID := uuid.New()
 	leadID := uuid.New()
@@ -192,7 +192,7 @@ func TestLeadService_UpdateStatus_Success(t *testing.T) {
 
 func TestLeadService_UpdateStatus_LeadNotFound(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	managerID := uuid.New()
 	leadID := uuid.New()
@@ -208,7 +208,7 @@ func TestLeadService_UpdateStatus_LeadNotFound(t *testing.T) {
 
 func TestLeadService_UpdateStatus_RepoError(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	managerID := uuid.New()
 	leadID := uuid.New()
@@ -224,7 +224,7 @@ func TestLeadService_UpdateStatus_RepoError(t *testing.T) {
 
 func TestLeadService_AddActivity_Success(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	userID := uuid.New()
 	leadID := uuid.New()
@@ -245,7 +245,7 @@ func TestLeadService_AddActivity_Success(t *testing.T) {
 
 func TestLeadService_AddActivity_RepoError(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	userID := uuid.New()
 	leadID := uuid.New()
@@ -265,7 +265,7 @@ func TestLeadService_AddActivity_RepoError(t *testing.T) {
 
 func TestLeadService_GetLeadDetails_Success(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	managerID := uuid.New()
 	leadID := uuid.New()
@@ -287,7 +287,7 @@ func TestLeadService_GetLeadDetails_Success(t *testing.T) {
 
 func TestLeadService_GetLeadDetails_LeadNotFound(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	managerID := uuid.New()
 	leadID := uuid.New()
@@ -304,7 +304,7 @@ func TestLeadService_GetLeadDetails_LeadNotFound(t *testing.T) {
 
 func TestLeadService_GetLeadDetails_ActivitiesError(t *testing.T) {
 	mockRepo := new(MockLeadRepository)
-	service := NewLeadService(mockRepo)
+	service := NewLeadService(mockRepo, nil)
 
 	managerID := uuid.New()
 	leadID := uuid.New()

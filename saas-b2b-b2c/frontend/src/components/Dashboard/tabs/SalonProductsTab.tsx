@@ -74,7 +74,7 @@ const SalonProductsTab: React.FC<SalonProductsTabProps> = ({ user }) => {
     fetchData();
   }, [fetchData]);
 
-  const formatMoney = (val: number) => new Intl.NumberFormat('ru-RU').format(val);
+  const formatMoney = (val: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(val);
 
   const sortedTopProducts = React.useMemo(() => {
     if (!data?.top_products) return [];

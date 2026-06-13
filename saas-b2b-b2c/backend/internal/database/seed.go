@@ -676,22 +676,26 @@ func ResetAndSeedData(db *gorm.DB) error {
 				Select("total_price, created_at").
 				Scan(&orders)
 
-			for i, o := range orders {
-				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
-					VALUES (gen_random_uuid(), $1, $2, $3, $4, 'sale', $5, $5)`,
-					s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Клиент %s #%d", s.Name, i+1), o.TotalPrice, o.CreatedAt)
+		for i, o := range orders {
+				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, phone, budget, status, created_at, updated_at)
+					VALUES (gen_random_uuid(), $1, $2, $3, $6, $4, 'sale', $5, $5)`,
+					s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Клиент %s #%d", s.Name, i+1), o.TotalPrice, o.CreatedAt, randomPhone(rng))
 				leadCount++
 			}
 
-			// Для каждого месяца добавляем new-лиды и open-лиды (для реалистичной конверсии)
+			// Для каждого месяца добавляем new-лиды, open-лиды и wait-лиды (для реалистичной конверсии)
 			// Для текущего месяца — побольше, для прошлых — по 1-2
-			var newLeadCount, openLeadCount int
+			var newLeadCount, openLeadCount, waitLeadCount int
 			if isCurrentMonth {
 				newLeadCount = 2 + rng.Intn(2)
 				openLeadCount = 1 + rng.Intn(3)
+				if now.Day() > 6 {
+					waitLeadCount = 1 + rng.Intn(2)
+				}
 			} else {
 				newLeadCount = rng.Intn(2)
 				openLeadCount = rng.Intn(2)
+				waitLeadCount = rng.Intn(2)
 			}
 
 			for i := 0; i < newLeadCount; i++ {
@@ -700,10 +704,10 @@ func ResetAndSeedData(db *gorm.DB) error {
 					day = 1 + rng.Intn(now.Day())
 				}
 				createdAt := time.Date(m.Year(), m.Month(), day, 10, 0, 0, 0, time.UTC)
-				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
-					VALUES (gen_random_uuid(), $1, $2, $3, $4, 'new', $5, $5)`,
+				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, phone, budget, status, created_at, updated_at)
+					VALUES (gen_random_uuid(), $1, $2, $3, $6, $4, 'new', $5, $5)`,
 					s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Новый лид %s", s.Name),
-					roundVal(30000+rng.Float64()*70000), createdAt)
+					roundVal(30000+rng.Float64()*70000), createdAt, randomPhone(rng))
 				leadCount++
 			}
 
@@ -717,10 +721,23 @@ func ResetAndSeedData(db *gorm.DB) error {
 					day = 1 + rng.Intn(now.Day())
 				}
 				createdAt := time.Date(m.Year(), m.Month(), day, 11, 0, 0, 0, time.UTC)
-				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
-					VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $6)`,
+				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, phone, budget, status, created_at, updated_at)
+					VALUES (gen_random_uuid(), $1, $2, $3, $7, $4, $5, $6, $6)`,
 					s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Открытый лид %s", s.Name),
-					roundVal(50000+rng.Float64()*100000), status, createdAt)
+					roundVal(50000+rng.Float64()*100000), status, createdAt, randomPhone(rng))
+				leadCount++
+			}
+
+			for i := 0; i < waitLeadCount; i++ {
+				day := 1 + rng.Intn(28)
+				if isCurrentMonth {
+					day = 1 + rng.Intn(now.Day()-6)
+				}
+				createdAt := time.Date(m.Year(), m.Month(), day, 15, 0, 0, 0, time.UTC)
+				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, phone, budget, status, created_at, updated_at)
+					VALUES (gen_random_uuid(), $1, $2, $3, $6, $4, 'wait', $5, $5)`,
+					s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Клиент %s (КП ожидание)", s.Name),
+					roundVal(70000+rng.Float64()*200000), createdAt, randomPhone(rng))
 				leadCount++
 			}
 		}
@@ -738,10 +755,36 @@ func ResetAndSeedData(db *gorm.DB) error {
 			for i := int64(0); i < needed; i++ {
 				dayOffset := rng.Intn(7)
 				createdAt := now.AddDate(0, 0, -dayOffset)
-				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
-					VALUES (gen_random_uuid(), $1, $2, $3, $4, 'sale', $5, $5)`,
+				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, phone, budget, status, created_at, updated_at)
+					VALUES (gen_random_uuid(), $1, $2, $3, $6, $4, 'sale', $5, $5)`,
 					s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Клиент %s (нед.)", s.Name),
-					roundVal(50000+rng.Float64()*150000), createdAt)
+					roundVal(50000+rng.Float64()*150000), createdAt, randomPhone(rng))
+				leadCount++
+			}
+		}
+	}
+
+	// Гарантируем каждому салону sale-лиды на сегодня, вчера и 7 дней назад
+	// для корректной работы виджета "Динамика" на дашборде
+	for _, s := range salons {
+		for _, d := range []struct {
+			label string
+			t     time.Time
+		}{
+			{"сегодня", now},
+			{"вчера", now.AddDate(0, 0, -1)},
+			{"7 дней назад", now.AddDate(0, 0, -7)},
+		} {
+			var count int64
+			db.Table("leads").
+				Where("salon_id = ? AND status = 'sale' AND DATE(created_at) = DATE(?)", s.ID, d.t).
+				Count(&count)
+			if count == 0 {
+				db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, phone, budget, status, created_at, updated_at)
+					VALUES (gen_random_uuid(), $1, $2, $3, $6, $4, 'sale', $5, $5)`,
+					s.ID, pickMgr(s.ID, s.DealerID),
+					fmt.Sprintf("Клиент %s (%s)", s.Name, d.label),
+					roundVal(50000+rng.Float64()*150000), d.t, randomPhone(rng))
 				leadCount++
 			}
 		}
@@ -755,10 +798,10 @@ func ResetAndSeedData(db *gorm.DB) error {
 			Where("salon_id = ? AND status IN ? AND created_at BETWEEN ? AND ?", s.ID, []string{"sale", "paid"}, currentMonthStart, now).
 			Count(&count)
 		if count == 0 {
-			db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
-				VALUES (gen_random_uuid(), $1, $2, $3, $4, 'sale', NOW(), NOW())`,
+			db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, phone, budget, status, created_at, updated_at)
+				VALUES (gen_random_uuid(), $1, $2, $3, $5, $4, 'sale', NOW(), NOW())`,
 				s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Клиент %s", s.Name),
-				roundVal(50000+rng.Float64()*100000))
+				roundVal(50000+rng.Float64()*100000), randomPhone(rng))
 			leadCount++
 		}
 	}
@@ -774,10 +817,26 @@ func ResetAndSeedData(db *gorm.DB) error {
 			if rng.Float32() < 0.5 {
 				status = "meeting"
 			}
-			db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, budget, status, created_at, updated_at)
-				VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW(), NOW())`,
+			db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, phone, budget, status, created_at, updated_at)
+				VALUES (gen_random_uuid(), $1, $2, $3, $6, $4, $5, NOW(), NOW())`,
 				s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Открытый лид %s", s.Name),
-				roundVal(50000+rng.Float64()*100000), status)
+				roundVal(50000+rng.Float64()*100000), status, randomPhone(rng))
+			leadCount++
+		}
+	}
+
+	// Гарантируем каждому салону хотя бы 1 wait-лид (КП без ответа >5 дней) для горячих сделок
+	for _, s := range salons {
+		var count int64
+		db.Table("leads").
+			Where("salon_id = ? AND status = ? AND updated_at < ?", s.ID, "wait", now.AddDate(0, 0, -5)).
+			Count(&count)
+		if count == 0 {
+			createdAt := now.AddDate(0, 0, -8)
+			db.Exec(`INSERT INTO leads (id, salon_id, manager_id, full_name, phone, budget, status, created_at, updated_at)
+				VALUES (gen_random_uuid(), $1, $2, $3, $6, $4, 'wait', $5, $5)`,
+				s.ID, pickMgr(s.ID, s.DealerID), fmt.Sprintf("Клиент %s (КП ожидание)", s.Name),
+				roundVal(50000+rng.Float64()*200000), createdAt, randomPhone(rng))
 			leadCount++
 		}
 	}
@@ -816,6 +875,29 @@ func ResetAndSeedData(db *gorm.DB) error {
 	var lostUpdated int64
 	db.Table("leads").Where("disqualify_reason IS NOT NULL AND disqualify_reason != ''").Count(&lostUpdated)
 	log.Printf("Lost sales reasons assigned: %d", lostUpdated)
+
+	// Заполняем interest_product для всех лидов (включая sale/paid) для Топ-10 товаров
+	db.Exec(`
+		UPDATE leads SET
+			interest_product = CASE ((EXTRACT(EPOCH FROM created_at)::int) % 12)
+				WHEN 0 THEN 'Кухня «Классика»'
+				WHEN 1 THEN 'Диван «Престиж»'
+				WHEN 2 THEN 'Матрас «Ортопед»'
+				WHEN 3 THEN 'Кухня «Лофт»'
+				WHEN 4 THEN 'Шкаф «Гармония»'
+				WHEN 5 THEN 'Стол «Стиль»'
+				WHEN 6 THEN 'Диван «Комфорт»'
+				WHEN 7 THEN 'Матрас «Дуо»'
+				WHEN 8 THEN 'Кухня «Модерн»'
+				WHEN 9 THEN 'Кресло «Эко»'
+				WHEN 10 THEN 'Стенка «Практик»'
+				WHEN 11 THEN 'Матрас «Релакс»'
+			END
+		WHERE interest_product IS NULL OR interest_product = ''
+	`)
+	var interestUpdated int64
+	db.Table("leads").Where("interest_product IS NOT NULL AND interest_product != ''").Count(&interestUpdated)
+	log.Printf("Interest products assigned: %d", interestUpdated)
 
 	// Создаём возвраты для каждого дилера (по 10 шт)
 	log.Println("Creating dealer return requests...")
@@ -1125,6 +1207,10 @@ func ResetAndSeedData(db *gorm.DB) error {
 
 	log.Println("=== Reset and Seed Data complete ===")
 	return nil
+}
+
+func randomPhone(rng *rand.Rand) string {
+	return "+7 (999) " + fmt.Sprintf("%03d-%02d-%02d", rng.Intn(999), rng.Intn(99), rng.Intn(99))
 }
 
 func roundVal(v float64) float64 {

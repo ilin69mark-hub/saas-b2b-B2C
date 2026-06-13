@@ -29,6 +29,9 @@ type Tenant struct {
     TargetExtrasPercent  float64 `json:"target_extras_percent" gorm:"default:15"`
     MaxBonus             float64 `json:"max_bonus" gorm:"default:50000"`
 
+    // Нормы для светофора
+    DailyLeadsNorm int `json:"daily_leads_norm" gorm:"default:10"`
+
     // Soft Delete (для аналитики Churn)
     DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 

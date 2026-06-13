@@ -92,6 +92,18 @@ type DashboardMainResponse struct {
 
 	// Оплаты
 	PendingPayments []PendingPayment `json:"pending_payments"` // Список договоров на сегодня
+
+	// Просроченные оплаты
+	OverdueWarnings []OverdueWarning `json:"overdue_warnings"`
+}
+
+// OverdueWarning - просроченная оплата
+type OverdueWarning struct {
+	ContractID  uuid.UUID `json:"contract_id"`
+	ClientName  string    `json:"client_name"`
+	Amount      float64   `json:"amount"`
+	DaysOverdue int       `json:"days_overdue"`
+	PaymentDate string    `json:"payment_date"`
 }
 
 // PendingPayment - запланированная оплата

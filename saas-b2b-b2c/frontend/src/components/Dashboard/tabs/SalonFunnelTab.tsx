@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Row, Col, Card, Typography, Button, Modal, Form, Input, Select, Table, Tag, Spin, message, Alert } from 'antd';
-import { PlusOutlined, WarningOutlined, ExclamationCircleOutlined, UserAddOutlined } from '@ant-design/icons';
+import { PlusOutlined, WarningOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import apiClient from '@/api/axiosClient';
 import { useCreateLeadMutation, useGetLeadsQuery, useUpdateLeadStatusMutation } from '@/services/api';
 import dayjs from 'dayjs';
 import PhoneInput from '@/components/common/PhoneInput';
-import { normalizeForApi } from '@/utils/phone';
+import { normalizeForApi, formatPhone } from '@/utils/phone';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -49,6 +49,27 @@ interface DashboardFunnelData {
   hot_deals: HotDeal[];
   fresh_leads: FreshLead[];
 }
+
+const STATUS_OPTIONS = [
+  { value: 'new', label: 'Новый' },
+  { value: 'contact', label: 'Контакт' },
+  { value: 'meeting', label: 'Замер' },
+  { value: 'wait', label: 'КП' },
+  { value: 'sale', label: 'Договор' },
+  { value: 'paid', label: 'Оплачен' },
+] as const;
+
+const STATUS_COLORS: Record<string, string> = {
+  new: 'blue',
+  contact: 'orange',
+  meeting: 'cyan',
+  wait: 'purple',
+  sale: 'green',
+  paid: 'gold',
+};
+
+const getStatusLabel = (status: string) =>
+  STATUS_OPTIONS.find(o => o.value === status)?.label || status;
 
 const stageConfig: Record<string, { color: string; icon: string }> = {
   traffic: { color: '#1890ff', icon: '👥' },
@@ -185,11 +206,14 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
       title: 'Дата КП',
       dataIndex: 'created_at',
       key: 'created_at',
+      render: (val: string) => dayjs(val).format('DD.MM.YYYY'),
+      sorter: (a: HotDeal, b: HotDeal) => dayjs(a.created_at).unix() - dayjs(b.created_at).unix(),
     },
     {
       title: 'Дней без движения',
       dataIndex: 'days_stalled',
       key: 'days_stalled',
+      sorter: (a: HotDeal, b: HotDeal) => a.days_stalled - b.days_stalled,
       render: (days: number) => (
         <Tag color={days > 7 ? 'error' : days > 5 ? 'warning' : 'default'}>
           {days} дн.
@@ -200,6 +224,9 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
       title: 'Ответственный',
       dataIndex: 'manager_name',
       key: 'manager_name',
+      filters: [...new Set((data?.hot_deals || []).map(d => d.manager_name).filter(Boolean))].map(n => ({ text: n, value: n })),
+      onFilter: (value: any, record: HotDeal) => record.manager_name === value,
+      filterSearch: true,
       render: (name: string) => name || '-',
     },
   ];
@@ -210,6 +237,9 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
       title: 'Источник',
       dataIndex: 'source',
       key: 'source',
+      filters: [...new Set((data?.fresh_leads || []).map(d => d.source).filter(Boolean))].map(n => ({ text: n, value: n })),
+      onFilter: (value: any, record: FreshLead) => record.source === value,
+      filterSearch: true,
     },
     {
       title: 'Клиент',
@@ -220,16 +250,28 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
       title: 'Телефон',
       dataIndex: 'phone',
       key: 'phone',
+      render: (val: string) => val ? formatPhone(val) : '-',
     },
     {
       title: 'Время',
       dataIndex: 'created_at',
       key: 'created_at',
+      render: (val: string) => dayjs(val).format('DD.MM.YYYY HH:mm'),
+      sorter: (a: FreshLead, b: FreshLead) => dayjs(a.created_at).unix() - dayjs(b.created_at).unix(),
     },
     {
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
+      filters: [
+        { text: 'Не назначен', value: 'unassigned' },
+        { text: 'В работе', value: 'in_progress' },
+        { text: 'Обработан', value: 'processed' },
+      ],
+      onFilter: (value: any, record: FreshLead) => {
+        if (value === 'processed') return record.status !== 'unassigned' && record.status !== 'in_progress';
+        return record.status === value;
+      },
       render: (status: string, record: FreshLead) => {
         const createdTime = dayjs(record.created_at, 'YYYY-MM-DD HH:mm');
         const minutesAgo = dayjs().diff(createdTime, 'minute');
@@ -247,21 +289,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
         return <Tag color="success">Обработан</Tag>;
       },
     },
-    {
-      title: 'Действие',
-      key: 'action',
-      render: (_: any, record: FreshLead) => (
-        record.status === 'unassigned' ? (
-          <Button
-            size="small"
-            icon={<UserAddOutlined />}
-            onClick={() => handleAssignLead(record.id, user.id)}
-          >
-            Взять
-          </Button>
-        ) : null
-      ),
-    },
+
   ];
 
   if (loading) {
@@ -396,12 +424,11 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
                   onChange={(val) => handleStatusChange(record.id, val)}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <Option value="new"><Tag color="blue">Новый</Tag></Option>
-                  <Option value="contact"><Tag color="orange">Контакт</Tag></Option>
-                  <Option value="meeting"><Tag color="cyan">Замер</Tag></Option>
-                  <Option value="wait"><Tag color="purple">КП</Tag></Option>
-                  <Option value="sale"><Tag color="green">Договор</Tag></Option>
-                  <Option value="paid"><Tag color="gold">Оплачен</Tag></Option>
+                  {STATUS_OPTIONS.map(o => (
+                    <Option key={o.value} value={o.value}>
+                      <Tag color={STATUS_COLORS[o.value]}>{o.label}</Tag>
+                    </Option>
+                  ))}
                 </Select>
               ),
             },
@@ -447,12 +474,9 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
             style={{ width: 150 }}
             onChange={(val) => selectedLead && handleStatusChange(selectedLead.id, val)}
           >
-            <Option value="new">Новый</Option>
-            <Option value="contact">Контакт</Option>
-            <Option value="meeting">Замер</Option>
-            <Option value="wait">КП</Option>
-            <Option value="sale">Договор</Option>
-            <Option value="paid">Оплачен</Option>
+            {STATUS_OPTIONS.map(o => (
+              <Option key={o.value} value={o.value}>{o.label}</Option>
+            ))}
           </Select>,
         ] : undefined}
         width={500}
@@ -460,16 +484,10 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
         {selectedLead && (
           <div>
             <p><strong>Клиент:</strong> {selectedLead.full_name}</p>
-            <p><strong>Телефон:</strong> {selectedLead.phone}</p>
+            <p><strong>Телефон:</strong> {formatPhone(selectedLead.phone)}</p>
             <p><strong>Интерес:</strong> {selectedLead.interest_product || 'Не указан'}</p>
             <p><strong>Бюджет:</strong> {selectedLead.budget ? `${formatMoney(selectedLead.budget)} ₽` : 'Не указан'}</p>
-            <p><strong>Статус:</strong> {
-              ['new', 'contact', 'meeting', 'wait', 'sale', 'paid'].includes(selectedLead.status)
-                ? ['Новый', 'Контакт', 'Замер', 'КП', 'Договор', 'Оплачен'][
-                    ['new', 'contact', 'meeting', 'wait', 'sale', 'paid'].indexOf(selectedLead.status)
-                  ]
-                : selectedLead.status
-            }</p>
+            <p><strong>Статус:</strong> {getStatusLabel(selectedLead.status)}</p>
             <p><strong>Дата создания:</strong> {new Date(selectedLead.created_at).toLocaleString('ru-RU')}</p>
           </div>
         )}
@@ -477,7 +495,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
 
       {/* Модальное окно списка сделок этапа */}
       <Modal
-        title={`Сделки: ${stageConfig[selectedStage || '']?.icon} ${selectedStage}`}
+        title={`Сделки: ${stageConfig[selectedStage || '']?.icon} ${data?.stages.find(s => s.stage === selectedStage)?.label || selectedStage}`}
         open={!!selectedStage && !selectedLead}
         onCancel={() => setSelectedStage(null)}
         footer={null}
@@ -490,7 +508,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
             pagination={{ pageSize: 10 }}
             columns={[
               { title: 'Клиент', dataIndex: 'full_name', key: 'full_name' },
-              { title: 'Телефон', dataIndex: 'phone', key: 'phone' },
+              { title: 'Телефон', dataIndex: 'phone', key: 'phone', render: (val: string) => val ? formatPhone(val) : '-' },
               {
                 title: 'Бюджет',
                 dataIndex: 'budget',
@@ -501,7 +519,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
                 title: 'Статус',
                 dataIndex: 'status',
                 key: 'status',
-                render: (s: string) => <Tag>{s}</Tag>,
+                render: (s: string) => <Tag color={STATUS_COLORS[s] || 'default'}>{getStatusLabel(s)}</Tag>,
               },
             ]}
           />

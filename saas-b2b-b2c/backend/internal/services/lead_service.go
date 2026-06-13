@@ -2,19 +2,23 @@ package services
 
 import (
 	"context"
-	"fmt" // Добавлен импорт для форматирования ошибок
+	"fmt"
+	"time"
+
 	"franchise-saas-backend/internal/models"
 	"franchise-saas-backend/internal/repository"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type LeadService struct {
 	repo repository.LeadRepositoryInterface
+	db   *gorm.DB
 }
 
-func NewLeadService(repo repository.LeadRepositoryInterface) *LeadService {
-	return &LeadService{repo: repo}
+func NewLeadService(repo repository.LeadRepositoryInterface, db *gorm.DB) *LeadService {
+	return &LeadService{repo: repo, db: db}
 }
 
 // CreateLead создает нового лида.
@@ -53,11 +57,51 @@ func (s *LeadService) GetMyLeads(ctx context.Context, managerID uuid.UUID) ([]mo
 }
 
 func (s *LeadService) UpdateStatus(ctx context.Context, managerID, leadID uuid.UUID, status string, disqualifyReason string) error {
-	_, err := s.repo.GetLeadByID(ctx, leadID, managerID)
+	lead, err := s.repo.GetLeadByID(ctx, leadID, managerID)
 	if err != nil {
 		return err
 	}
-	return s.repo.UpdateLeadStatus(ctx, leadID, status, disqualifyReason)
+	if err := s.repo.UpdateLeadStatus(ctx, leadID, status, disqualifyReason); err != nil {
+		return err
+	}
+
+	// Автосоздание/обновление договора при конверсии лида
+	switch status {
+	case "sale":
+		paymentDate := time.Now().AddDate(0, 0, 7)
+		contract := &models.Contract{
+			SalonID:       lead.SalonID,
+			LeadID:        &leadID,
+			ManagerID:     lead.ManagerID,
+			ClientName:    lead.FullName,
+			ClientPhone:   lead.Phone,
+			ClientEmail:   lead.Email,
+			TotalAmount:   lead.Budget,
+			RemainAmount:  lead.Budget,
+			MarginPercent: 37,
+			Status:        "pending",
+			PaymentStatus: "awaiting_payment",
+			PaymentDate:   &paymentDate,
+			Products:      lead.InterestProduct,
+		}
+		if err := s.db.WithContext(ctx).Create(contract).Error; err != nil {
+			return fmt.Errorf("failed to create contract: %w", err)
+		}
+	case "paid", "contract":
+		updates := map[string]interface{}{
+			"payment_status": "paid",
+			"paid_amount":    lead.Budget,
+			"remain_amount":  0,
+		}
+		if err := s.db.WithContext(ctx).
+			Model(&models.Contract{}).
+			Where("lead_id = ?", leadID).
+			Updates(updates).Error; err != nil {
+			return fmt.Errorf("failed to update contract: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (s *LeadService) AddActivity(ctx context.Context, userID, leadID uuid.UUID, req models.AddLeadActivityRequest) error {

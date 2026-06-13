@@ -56,7 +56,8 @@ const SalonMainTab: React.FC<SalonMainTabProps> = ({ user }) => {
     fetchData();
   }, [fetchData]);
 
-  const formatMoney = (val: number) => new Intl.NumberFormat('ru-RU').format(val);
+  const formatMoney = (val: number) =>
+  new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val);
 
   const getDynamicColor = (value: number) => {
     if (value > 0) return '#52c41a';
@@ -101,7 +102,7 @@ const SalonMainTab: React.FC<SalonMainTabProps> = ({ user }) => {
     dynamic?: number;
     color?: string;
   }> = ({ title, value, suffix = '', dynamic, color }) => (
-    <Card size="small" style={{ borderRadius: 8, height: '100%' }}>
+    <Card size="small" style={{ borderRadius: 8, height: '100%', textAlign: 'center' }}>
       <Text type="secondary" style={{ fontSize: 12 }}>{title}</Text>
       <div style={{ marginTop: 4 }}>
         <Text strong style={{ fontSize: 20, color: color || '#000' }}>
@@ -268,6 +269,17 @@ const SalonMainTab: React.FC<SalonMainTabProps> = ({ user }) => {
             title="Сегодня должны оплатить"
             style={{ marginTop: 16, borderRadius: 12 }}
           >
+            {data?.overdue_warnings && data.overdue_warnings.length > 0 && (
+              <Alert
+                message={`Просроченных оплат: ${data.overdue_warnings.length}`}
+                description={data.overdue_warnings.map((w, i) =>
+                  `${w.client_name} — ${formatMoney(w.amount)} ₽ (просрочка ${w.days_overdue} дн.)`
+                ).join('\n')}
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12, whiteSpace: 'pre-line' }}
+              />
+            )}
             {data?.pending_payments && data.pending_payments.length > 0 ? (
               <Table
                 dataSource={data.pending_payments}
@@ -325,7 +337,7 @@ const SalonMainTab: React.FC<SalonMainTabProps> = ({ user }) => {
             <div style={{ marginBottom: 12 }}>
               <Text type="secondary">Маржинальность</Text>
               <div>
-                <Text strong style={{ fontSize: 18, color: '#52c41a' }}>
+                <Text strong style={{ fontSize: 18, color: getDynamicColor(data?.margin_percent || 0) }}>
                   {(data?.margin_percent || 0).toFixed(1)}%
                 </Text>
               </div>
@@ -341,23 +353,6 @@ const SalonMainTab: React.FC<SalonMainTabProps> = ({ user }) => {
             </div>
           </Card>
 
-          {/* Прогноз */}
-          <Card
-            title="Прогноз выполнения"
-            style={{ marginTop: 16, borderRadius: 12 }}
-          >
-            <Progress
-              percent={data?.forecast || 0}
-              strokeColor={
-                (data?.forecast || 0) >= 100 ? '#52c41a' :
-                (data?.forecast || 0) >= 70 ? '#1890ff' : '#faad14'
-              }
-              format={(percent) => `${percent}%`}
-            />
-            <Text type="secondary" style={{ marginTop: 8, display: 'block' }}>
-              Ожидаемое выполнение плана к концу месяца
-            </Text>
-          </Card>
         </Col>
       </Row>
     </div>

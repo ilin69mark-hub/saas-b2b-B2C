@@ -1248,6 +1248,33 @@ func (h *KPIHandler) MarkAllDealerAlertsRead(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "All alerts marked as read"})
 }
 
+// UpdateDealerSettings - обновить настройки дилера (его тената)
+func (h *KPIHandler) UpdateDealerSettings(c *gin.Context) {
+	user, err := getCurrentUser(c)
+	if err != nil || user.TenantID == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid session"})
+		return
+	}
+
+	var req struct {
+		DailyLeadsNorm *int `json:"daily_leads_norm"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	updates := map[string]interface{}{}
+	if req.DailyLeadsNorm != nil {
+		updates["daily_leads_norm"] = *req.DailyLeadsNorm
+	}
+	if len(updates) > 0 {
+		h.kpiSvc.DB.Model(&models.Tenant{}).Where("id = ?", user.TenantID).Updates(updates)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Updated"})
+}
+
 // GetFranchiserDealers - получить список дилеров франчайзера
 func (h *KPIHandler) GetFranchiserDealers(c *gin.Context) {
 	user, err := getCurrentUser(c)

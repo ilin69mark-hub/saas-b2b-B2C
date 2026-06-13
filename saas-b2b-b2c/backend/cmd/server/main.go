@@ -69,7 +69,7 @@ func main() {
 	checklistService := services.NewChecklistService(checklistRepo)
 	adminService := services.NewAdminService(db)
 	notifService := services.NewNotificationService(notifRepo)
-	leadService := services.NewLeadService(leadRepo)
+	leadService := services.NewLeadService(leadRepo, db)
 	scheduleService := services.NewScheduleService(scheduleRepo)
 	kpiService := services.NewKPIService(db, kpiRepo, scheduleRepo)
 	goalService := services.NewGoalService(goalRepo)
@@ -190,6 +190,7 @@ func main() {
 		protected.POST("/dealer/promotions", promotionHandler.Create)
 		protected.PUT("/dealer/promotions/:id", promotionHandler.Update)
 		protected.DELETE("/dealer/promotions/:id", promotionHandler.Delete)
+		protected.PUT("/dealer/settings", kpiHandler.UpdateDealerSettings)
 
 		// Dashboard Franchiser
 		protected.GET("/franchiser/summary", kpiHandler.GetFranchiserSummary)

@@ -196,8 +196,8 @@ const DealerDirectives: React.FC<DealerDirectivesProps> = ({ user }) => {
                 const upcoming = data?.promotions?.filter(p => dayjs(p.start_date).isAfter(now)) || [];
                 const past = data?.promotions?.filter(p => dayjs(p.end_date).isBefore(now)) || [];
 
-                const renderPromo = (promo: Promotion, color: string) => (
-                  <div key={promo.id} style={{ marginBottom: 12, padding: 8, background: promo.is_expiring ? '#fff7e6' : `${color}08`, borderRadius: 4, borderLeft: promo.is_expiring ? '3px solid #faad14' : `3px solid ${color}` }}>
+                const renderPromo = (promo: Promotion, color: string, noBackground = false) => (
+                  <div key={promo.id} style={{ marginBottom: 12, padding: 8, background: noBackground ? 'transparent' : (promo.is_expiring ? '#fff7e6' : `${color}08`), borderRadius: 4, borderLeft: promo.is_expiring ? '3px solid #faad14' : `3px solid ${color}` }}>
                     <Row justify="space-between" align="middle">
                       <Col>
                         <Text strong>{promo.name}</Text>
@@ -240,7 +240,7 @@ const DealerDirectives: React.FC<DealerDirectivesProps> = ({ user }) => {
                     {past.length > 0 && (
                       <>
                         <div style={{ marginTop: 16, marginBottom: 8 }}><Text strong style={{ color: '#999999' }}>● Завершённые</Text></div>
-                        {past.map(p => renderPromo(p, '#ff4d4f'))}
+                        {past.map(p => renderPromo(p, '#ff4d4f', true))}
                       </>
                     )}
                   </>
@@ -261,7 +261,7 @@ const DealerDirectives: React.FC<DealerDirectivesProps> = ({ user }) => {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <DollarOutlined style={{ fontSize: 20, color: getWarningColor(data.warning_level) }} />
                     <div>
-                      <Text>Прогноз личной премии</Text>
+                      <Text>Текущая личная премия</Text>
                       <div>
                         <Title level={4} style={{ margin: 0, color: getWarningColor(data.warning_level) }}>
                           {formatMoney(data.bonus_forecast)} ₽

@@ -302,27 +302,49 @@ func (s *KPIService) GetDashboardMain(ctx context.Context, userID uuid.UUID, dat
 	}
 
 	// ====================
-	// 2. ДИНАМИКА (сравнение с прошлым днем и неделей)
+	// 2. ДИНАМИКА (сравнение сегодня со вчера и с прошлой неделей)
 	// ====================
-	// Вчера
 	yesterday := targetDate.AddDate(0, 0, -1)
-	var yesterdaySales float64
+	weekAgo := targetDate.AddDate(0, 0, -7)
+
+	var todaySales, yesterdaySales, weekAgoSales float64
+	var todayOrderSales, yesterdayOrderSales, weekAgoOrderSales float64
+
+	// Сегодня — лиды
+	s.DB.Model(&models.Lead{}).
+		Where("salon_id = ? AND status = ? AND DATE(created_at) = ?", salonID, "sale", targetDate.Format("2006-01-02")).
+		Select("COALESCE(SUM(budget), 0)").Scan(&todaySales)
+	// Сегодня — заказы
+	s.DB.Model(&models.Order{}).
+		Where("salon_id = ? AND status IN ? AND DATE(created_at) = ?", salonID, []string{"paid", "contract"}, targetDate.Format("2006-01-02")).
+		Select("COALESCE(SUM(total_price), 0)").Scan(&todayOrderSales)
+	todaySales += todayOrderSales
+
+	// Вчера — лиды
 	s.DB.Model(&models.Lead{}).
 		Where("salon_id = ? AND status = ? AND DATE(created_at) = ?", salonID, "sale", yesterday.Format("2006-01-02")).
 		Select("COALESCE(SUM(budget), 0)").Scan(&yesterdaySales)
+	// Вчера — заказы
+	s.DB.Model(&models.Order{}).
+		Where("salon_id = ? AND status IN ? AND DATE(created_at) = ?", salonID, []string{"paid", "contract"}, yesterday.Format("2006-01-02")).
+		Select("COALESCE(SUM(total_price), 0)").Scan(&yesterdayOrderSales)
+	yesterdaySales += yesterdayOrderSales
 
-	// Прошлая неделя (7 дней назад)
-	weekAgo := targetDate.AddDate(0, 0, -7)
-	var weekAgoSales float64
+	// Неделю назад — лиды
 	s.DB.Model(&models.Lead{}).
 		Where("salon_id = ? AND status = ? AND DATE(created_at) = ?", salonID, "sale", weekAgo.Format("2006-01-02")).
 		Select("COALESCE(SUM(budget), 0)").Scan(&weekAgoSales)
+	// Неделю назад — заказы
+	s.DB.Model(&models.Order{}).
+		Where("salon_id = ? AND status IN ? AND DATE(created_at) = ?", salonID, []string{"paid", "contract"}, weekAgo.Format("2006-01-02")).
+		Select("COALESCE(SUM(total_price), 0)").Scan(&weekAgoOrderSales)
+	weekAgoSales += weekAgoOrderSales
 
 	if yesterdaySales > 0 {
-		resp.DynamicDay = ((monthFact - yesterdaySales) / yesterdaySales) * 100
+		resp.DynamicDay = ((todaySales - yesterdaySales) / yesterdaySales) * 100
 	}
 	if weekAgoSales > 0 {
-		resp.DynamicWeek = ((monthFact - weekAgoSales) / weekAgoSales) * 100
+		resp.DynamicWeek = ((todaySales - weekAgoSales) / weekAgoSales) * 100
 	}
 
 	// ====================
@@ -379,11 +401,27 @@ func (s *KPIService) GetDashboardMain(ctx context.Context, userID uuid.UUID, dat
 		Where("salon_id = ? AND DATE(created_at) = ?", salonID, today).
 		Count(&todayLeads)
 
-	// Норма - 10 лидов в день (можно сделать настраиваемой)
+	// Норма - из настроек тената (если не задана — default)
 	normTraffic := defaultNormTraffic
-	if todayLeads >= int64(normTraffic) {
+	var dbUser models.User
+	if s.DB.First(&dbUser, userID).Error == nil && dbUser.TenantID != nil {
+		var tenant models.Tenant
+		s.DB.First(&tenant, dbUser.TenantID)
+		if tenant.DailyLeadsNorm > 0 {
+			normTraffic = tenant.DailyLeadsNorm
+		}
+	}
+
+	// Экстраполяция на конец дня (чтобы не было красного в 10 утра)
+	hoursElapsed := time.Now().Hour()
+	if hoursElapsed < 1 {
+		hoursElapsed = 1
+	}
+	projectedLeads := int(float64(todayLeads) * 24.0 / float64(hoursElapsed))
+
+	if projectedLeads >= normTraffic {
 		resp.TrafficStatus = "green"
-	} else if todayLeads >= int64(normTraffic/2) {
+	} else if projectedLeads >= normTraffic/2 {
 		resp.TrafficStatus = "yellow"
 	} else {
 		resp.TrafficStatus = "red"
@@ -444,6 +482,24 @@ func (s *KPIService) GetDashboardMain(ctx context.Context, userID uuid.UUID, dat
 			Amount:      c.RemainAmount,
 			Status:      c.PaymentStatus,
 			PaymentDate: today,
+		})
+	}
+
+	// ====================
+	// 9. ПРОСРОЧЕННЫЕ ОПЛАТЫ
+	// ====================
+	var overdueContracts []models.Contract
+	s.DB.Where("salon_id = ? AND payment_status NOT IN ? AND payment_date IS NOT NULL AND payment_date < ?",
+		salonID, []string{"paid"}, targetDate).
+		Find(&overdueContracts)
+	for _, c := range overdueContracts {
+		daysOverdue := int(targetDate.Sub(*c.PaymentDate).Hours() / 24)
+		resp.OverdueWarnings = append(resp.OverdueWarnings, models.OverdueWarning{
+			ContractID:  c.ID,
+			ClientName:  c.ClientName,
+			Amount:      c.RemainAmount,
+			DaysOverdue: daysOverdue,
+			PaymentDate: c.PaymentDate.Format("2006-01-02"),
 		})
 	}
 
@@ -508,7 +564,7 @@ func (s *KPIService) GetDashboardFunnel(ctx context.Context, userID uuid.UUID, d
 	addStage := func(stage, label string, count int64, sum float64) {
 		conv := 0.0
 		if prevCount > 0 {
-			conv = math.Round(float64(count)/float64(prevCount)*100) / 100
+			conv = math.Round(float64(count) / float64(prevCount) * 100)
 		}
 		resp.Stages = append(resp.Stages, models.FunnelStage{
 			Stage:      stage,
@@ -521,7 +577,12 @@ func (s *KPIService) GetDashboardFunnel(ctx context.Context, userID uuid.UUID, d
 	}
 
 	// Трафик → Консультация → Замер → КП → Договор → Оплата
-	addStage("traffic", "Трафик", trafficCount, statusSums["new"])
+	// Сумма трафика = сумма по всем статусам (а не только "new")
+	var trafficSum float64
+	for _, sum := range statusSums {
+		trafficSum += sum
+	}
+	addStage("traffic", "Трафик", trafficCount, trafficSum)
 	addStage("consultation", "Консультация", statusCounts["contact"], statusSums["contact"])
 	addStage("measurement", "Замер", statusCounts["meeting"], statusSums["meeting"])
 	addStage("kp", "КП", statusCounts["wait"], statusSums["wait"])
@@ -536,6 +597,9 @@ func (s *KPIService) GetDashboardFunnel(ctx context.Context, userID uuid.UUID, d
 	s.DB.Where("salon_id = ? AND status = ? AND updated_at < ?", salonID, "wait", hotDaysThreshold).
 		Find(&hotLeads)
 
+	// Загружаем имена менеджеров для горячих сделок
+	hotManagerNames := loadManagerNames(s.DB, hotLeads)
+
 	for _, lead := range hotLeads {
 		daysStalled := int(time.Since(lead.UpdatedAt).Hours() / 24)
 		resp.HotDeals = append(resp.HotDeals, models.HotDeal{
@@ -546,7 +610,7 @@ func (s *KPIService) GetDashboardFunnel(ctx context.Context, userID uuid.UUID, d
 			CreatedAt:   lead.UpdatedAt.Format("2006-01-02"),
 			DaysStalled: daysStalled,
 			ManagerID:   lead.ManagerID,
-			ManagerName: "",
+			ManagerName: hotManagerNames[lead.ManagerID],
 		})
 	}
 
@@ -556,6 +620,9 @@ func (s *KPIService) GetDashboardFunnel(ctx context.Context, userID uuid.UUID, d
 	s.DB.Where("salon_id = ? AND DATE(created_at) = ?", salonID, today).
 		Order("created_at DESC").
 		Find(&todayLeads)
+
+	// Загружаем имена менеджеров для свежих лидов
+	freshManagerNames := loadManagerNames(s.DB, todayLeads)
 
 	for _, lead := range todayLeads {
 		status := "unassigned"
@@ -570,11 +637,41 @@ func (s *KPIService) GetDashboardFunnel(ctx context.Context, userID uuid.UUID, d
 			CreatedAt:   lead.CreatedAt.Format("2006-01-02 15:04"),
 			Status:      status,
 			AssignedTo:  &lead.ManagerID,
-			ManagerName: "",
+			ManagerName: freshManagerNames[lead.ManagerID],
 		})
 	}
 
 	return resp, nil
+}
+
+// loadManagerNames загружает имена менеджеров для списка лидов
+func loadManagerNames(db *gorm.DB, leads []models.Lead) map[uuid.UUID]string {
+	names := make(map[uuid.UUID]string)
+	for _, lead := range leads {
+		if lead.ManagerID != uuid.Nil {
+			names[lead.ManagerID] = ""
+		}
+	}
+	if len(names) == 0 {
+		return names
+	}
+	ids := make([]uuid.UUID, 0, len(names))
+	for id := range names {
+		ids = append(ids, id)
+	}
+	type nameRow struct {
+		ID   uuid.UUID
+		Name string
+	}
+	var rows []nameRow
+	db.Table("users").
+		Select("id, COALESCE(first_name || ' ' || last_name, '') as name").
+		Where("id IN ?", ids).
+		Find(&rows)
+	for _, r := range rows {
+		names[r.ID] = r.Name
+	}
+	return names
 }
 
 // GetDashboardTeam - получение данных команды (рейтинг продавцов)
@@ -622,8 +719,8 @@ func (s *KPIService) GetDashboardTeam(ctx context.Context, userID uuid.UUID, per
 	salonID := *user.SalonID
 
 	var managers []models.User
-	// Ищем продавцов (sales_rep) которые управляются текущим пользователем или в том же салоне
-	s.DB.Where("managed_by = ? OR (salon_id = ? AND role = 'sales_rep')", userID, salonID).Find(&managers)
+	// Ищем продавцов (salon_manager) в текущем салоне
+	s.DB.Where("salon_id = ? AND role = 'salon_manager'", salonID).Find(&managers)
 
 	var totalRevenue, totalDeals, totalConversion, totalAvgCheck float64
 	var dealsCount, conversionCount int
@@ -845,6 +942,17 @@ func (s *KPIService) GetDashboardProducts(ctx context.Context, userID uuid.UUID,
 		if category == "" {
 			category = "Мебель"
 		}
+		margin := 37.0
+		switch category {
+		case "Кухни":
+			margin = 35.0
+		case "Мягкая":
+			margin = 40.0
+		case "Корпусная":
+			margin = 30.0
+		case "Матрасы":
+			margin = 45.0
+		}
 		resp.TopProducts = append(resp.TopProducts, models.TopProduct{
 			ID:           ps.Name,
 			Name:         ps.Name,
@@ -853,7 +961,7 @@ func (s *KPIService) GetDashboardProducts(ctx context.Context, userID uuid.UUID,
 			Revenue:      ps.Revenue,
 			Quantity:     ps.Quantity,
 			SharePercent: share,
-			Margin:       25.0,
+			Margin:       margin,
 		})
 	}
 

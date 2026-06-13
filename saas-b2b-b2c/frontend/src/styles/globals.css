@@ -265,6 +265,15 @@ a {
 .p-3 { padding: 1rem; }
 .p-4 { padding: 1.5rem; }
 
+/* Row highlight for slow-moving / high-loss items */
+.bg-red-light {
+  background-color: #fff1f0;
+}
+
+[data-theme='dark'] .bg-red-light {
+  background-color: #2a1215;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .dashboard-container {
