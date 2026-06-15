@@ -25,6 +25,9 @@ describe('superAdminStore', () => {
     setStats({
       mrr: 1000000,
       arr: 12000000,
+      activeTenants: 0,
+      newThisMonth: 0,
+      churnedThisMonth: 0,
       churnRate: 3.5,
       overduePayments: 2,
       arpu: 10000,

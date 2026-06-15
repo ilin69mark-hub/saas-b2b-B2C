@@ -62,6 +62,33 @@ func SeedUsers(db *gorm.DB) error {
 	return nil
 }
 
+func SeedPlans(db *gorm.DB) error {
+	type planDef struct {
+		Name      string
+		Price     float64
+		MaxSalons int
+		MaxUsers  int
+	}
+	plans := []planDef{
+		{"Start", 15000, 1, 10},
+		{"Pro", 35000, 5, 30},
+		{"Enterprise", 75000, 999, 100},
+	}
+
+	for _, p := range plans {
+		var count int64
+		db.Table("plans").Where("name = ?", p.Name).Count(&count)
+		if count > 0 {
+			continue
+		}
+		db.Exec(`INSERT INTO plans (id, name, price, max_salons, max_users, created_at)
+			VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())`,
+			p.Name, p.Price, p.MaxSalons, p.MaxUsers)
+		log.Printf("Plan created: %s (%d ₽)", p.Name, int(p.Price))
+	}
+	return nil
+}
+
 func SeedChecklists(db *gorm.DB) error {
 	checklists := []struct {
 		Title       string
@@ -81,7 +108,7 @@ func SeedChecklists(db *gorm.DB) error {
 			continue
 		}
 
-		db.Exec(`INSERT INTO checklists (id, assignee_id, title, description, status, created_at, updated_at)
+		db.Exec(`INSERT INTO checklists (id, assigned_to, title, description, status, created_at, updated_at)
 			VALUES (gen_random_uuid(), $1, $2, $3, 'pending', NOW(), NOW())`,
 			userID, c.Title, c.Description)
 		log.Printf("Checklist created: %s", c.Title)
@@ -137,7 +164,7 @@ func ResetAndSeedData(db *gorm.DB) error {
 		"messages", "schedule_events", "daily_goals", "orders", "goals",
 		"task_reports", "tasks", "dealer_expenses", "dealer_requests",
 		"dealer_tasks", "invoices", "lead_activities", "leads",
-		"marketing_budgets", "user_logs", "benchmarks", "unit_templates",
+		"marketing_budgets", "user_logs", "audit_logs", "benchmarks", "unit_templates",
 	}
 	for _, t := range tables {
 		db.Exec("DELETE FROM " + t)
@@ -1117,9 +1144,64 @@ func ResetAndSeedData(db *gorm.DB) error {
 
 	// 17. Seed product_inventory for each salon
 	log.Println("Seeding product inventory...")
+	seedProductInventory(db, franchiser.TenantID, rng)
+
+	// Assign random plans to tenants
+	var planRows []struct{ ID string }
+	db.Table("plans").Select("id").Scan(&planRows)
+	if len(planRows) > 0 {
+		var tenantRows []struct{ ID string }
+		db.Table("tenants").Select("id").Scan(&tenantRows)
+		for _, t := range tenantRows {
+			plan := planRows[rng.Intn(len(planRows))]
+			db.Exec("UPDATE tenants SET plan_id = $1::uuid WHERE id = $2", plan.ID, t.ID)
+		}
+		log.Printf("Plans assigned to %d tenants", len(tenantRows))
+	}
+
+	// Seed user_logs for DAU/WAU/MAU activity metrics
+	seedUserLogs(db, rng)
+
+	// Seed audit_logs for demo security events (only if empty — real data from middleware takes priority)
+	var auditCount int64
+	db.Model(&models.AuditLog{}).Count(&auditCount)
+	if auditCount == 0 {
+		seedAuditLogs(db, rng)
+	}
+
+	// Seed demo invoice for MRR metrics
+	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	paidAt := startOfMonth.Add(24 * time.Hour)
+	db.Exec(`INSERT INTO invoices (tenant_id, amount, status, due_date, paid_at, created_at)
+		VALUES ($1, $2, 'paid', $3, $4, $5)`,
+		franchiser.TenantID, 50000, startOfMonth.AddDate(0, 1, 0), paidAt, startOfMonth)
+	log.Println("Demo invoice created for MRR metrics")
+
+	log.Println("=== Reset and Seed Data complete ===")
+	return nil
+}
+
+func seedProductInventory(db *gorm.DB, tenantID string, rng *rand.Rand) {
+	type orderProduct struct {
+		collection string
+		category   string
+	}
+	orderProducts := []orderProduct{
+		{"Кухни", "Кухни"},
+		{"Мягкая", "Диваны"},
+		{"Мягкая", "Кресла"},
+		{"Корпусная", "Шкафы"},
+		{"Корпусная", "Столы"},
+		{"Матрасы", "Матрасы"},
+		{"Мягкая", "Пуфы"},
+		{"Корпусная", "Стеллажи"},
+	}
+
+	var salons []struct{ ID string }
+	db.Table("salons").Where("tenant_id = ?", tenantID).Select("id").Find(&salons)
+
 	invCount := 0
 	for _, s := range salons {
-		// 3-5 продуктов на салон
 		numInv := 3 + rng.Intn(3)
 		perm := rng.Perm(len(orderProducts))
 		deficitAdded := false
@@ -1130,18 +1212,15 @@ func ResetAndSeedData(db *gorm.DB) error {
 			onDisp := 1 + rng.Intn(5)
 			sold := 1 + rng.Intn(10)
 			price := 15000.0 + rng.Float64()*135000.0
-			turnover := 20 + rng.Intn(80)
+			turnover := 10 + rng.Intn(30)
 
-			// Первый товар — дефицит (0 на складе, но был спрос)
-			if !deficitAdded {
+			if !deficitAdded && i > 0 {
 				stockWH = 0
 				onDisp = 0
-				sold = 3 + rng.Intn(5)
+				sold = 0
 				turnover = 0
 				deficitAdded = true
 			}
-
-			// Второй товар — не-ликвид (> 90 дней, нет продаж)
 			if !nonLiquidAdded && i > 0 {
 				stockWH = 10 + rng.Intn(10)
 				onDisp = 2 + rng.Intn(3)
@@ -1159,54 +1238,100 @@ func ResetAndSeedData(db *gorm.DB) error {
 		}
 	}
 	log.Printf("Product inventory records created: %d", invCount)
+}
 
-	// 16. Create notifications for managers (unread)
-	log.Println("Creating notifications...")
-	notifCount := 0
-	notifTemplates := []struct {
-		title   string
-		message string
-		daysAgo int
-	}{
-		{"Новый отчёт", "Еженедельный отчёт по продажам готов", 1},
-		{"Напоминание", "У дилера ИП Вектор просрочена задача", 3},
-		{"Системное уведомление", "Обновление тарифов с 1 июля", 5},
+func seedUserLogs(db *gorm.DB, rng *rand.Rand) {
+	log.Println("Seeding user_logs for DAU/WAU/MAU...")
+
+	type userInfo struct {
+		ID       string
+		TenantID string
+		Role     string
 	}
-	for _, mgr := range managers {
-		for _, tmpl := range notifTemplates {
-			createdAt := now.AddDate(0, 0, -tmpl.daysAgo)
-			db.Exec(`INSERT INTO notifications (user_id, type, title, message, is_read, created_at)
-				VALUES ($1, 'info', $2, $3, FALSE, $4)`,
-				mgr.ID, tmpl.title, tmpl.message, createdAt)
-			notifCount++
+	var users []userInfo
+	db.Table("users").
+		Select("id, tenant_id, role").
+		Where("role != 'super_admin'").
+		Scan(&users)
+
+	if len(users) == 0 {
+		return
+	}
+
+	now := time.Now()
+	daysBack := 60
+	actions := []string{"login", "view_dashboard", "view_leads", "create_lead", "update_lead", "view_reports", "export_data", "view_orders", "error"}
+
+	logCount := 0
+	for day := daysBack; day >= 0; day-- {
+		date := now.AddDate(0, 0, -day)
+		for _, u := range users {
+			// ~70% chance of activity on weekdays, ~40% on weekends
+			dow := date.Weekday()
+			isWeekend := dow == time.Saturday || dow == time.Sunday
+			chance := 0.7
+			if isWeekend {
+				chance = 0.4
+			}
+			// Less activity for non-daily roles
+			if u.Role == "dealer" || u.Role == "salon_manager" {
+				chance *= 0.8
+			}
+			if rng.Float64() > chance {
+				continue
+			}
+			// 1-3 actions per active user per day
+			numActions := 1 + rng.Intn(3)
+			for a := 0; a < numActions; a++ {
+				action := actions[rng.Intn(len(actions))]
+				hour := 8 + rng.Intn(12)
+				createdAt := time.Date(date.Year(), date.Month(), date.Day(), hour, rng.Intn(60), rng.Intn(60), 0, time.UTC)
+
+				tenantID := u.TenantID
+				db.Exec(`INSERT INTO user_logs (id, user_id, tenant_id, action, ip_address, created_at)
+					VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
+					u.ID, tenantID, action, fmt.Sprintf("192.168.%d.%d", rng.Intn(255), rng.Intn(255)), createdAt)
+				logCount++
+			}
 		}
 	}
 
-	// Демо-уведомления для дилеров
-	dealerNotifTemplates := []struct {
-		title   string
-		message string
-		daysAgo int
-		alertType string
-	}{
-		{"Низкий остаток на складе", "Кухня «Модерн» — осталось 2 шт на складе", 0, "system"},
-		{"Новый лид требует внимания", "Клиент Иванов А. запросил КП на диван", 1, "system"},
-		{"Просрочена задача", "Инвентаризация склада просрочена на 3 дня", 2, "system"},
-	}
-	for _, d := range dealers {
-		for _, tmpl := range dealerNotifTemplates {
-			createdAt := now.AddDate(0, 0, -tmpl.daysAgo)
-			data := fmt.Sprintf(`{"dealer_id":"%s"}`, d.ID)
-			db.Exec(`INSERT INTO notifications (user_id, type, title, message, is_read, data, created_at)
-				VALUES ($1, $2, $3, $4, FALSE, $5, $6)`,
-				d.ID, tmpl.alertType, tmpl.title, tmpl.message, data, createdAt)
-			notifCount++
-		}
-	}
-	log.Printf("Notifications created: %d", notifCount)
+	log.Printf("User logs created: %d", logCount)
+}
 
-	log.Println("=== Reset and Seed Data complete ===")
-	return nil
+func seedAuditLogs(db *gorm.DB, rng *rand.Rand) {
+	log.Println("Seeding audit_logs for demo security events...")
+
+	var tenants []struct{ ID string }
+	db.Table("tenants").Select("id").Scan(&tenants)
+	if len(tenants) == 0 {
+		return
+	}
+
+	now := time.Now()
+	eventTypes := []string{"failed_login", "unusual_ip", "mass_requests", "unauthorized_access"}
+	ips := []string{"185.220.101.45", "91.121.87.34", "45.33.32.156", "23.129.64.210", "103.235.46.91"}
+	detailsMap := map[string]string{
+		"failed_login":        "401 | POST /auth/login",
+		"unusual_ip":          "403 | GET /admin/tenants",
+		"mass_requests":       "429 | GET /api/v1/leads",
+		"unauthorized_access": "403 | POST /admin/tenants/new",
+	}
+
+	for i := 0; i < 10; i++ {
+		tenant := tenants[rng.Intn(len(tenants))]
+		eventType := eventTypes[rng.Intn(len(eventTypes))]
+		ip := ips[rng.Intn(len(ips))]
+
+		hour := rng.Intn(24)
+		createdAt := time.Date(now.Year(), now.Month(), now.Day(), hour, rng.Intn(60), rng.Intn(60), 0, time.UTC).AddDate(0, 0, -rng.Intn(7))
+
+		db.Exec(`INSERT INTO audit_logs (id, tenant_id, action, entity_type, entity_id, details, ip_address, created_at)
+			VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7)`,
+			tenant.ID, eventType, "security", "/", detailsMap[eventType], ip, createdAt)
+	}
+
+	log.Printf("Audit logs seeded: 10 entries")
 }
 
 func randomPhone(rng *rand.Rand) string {

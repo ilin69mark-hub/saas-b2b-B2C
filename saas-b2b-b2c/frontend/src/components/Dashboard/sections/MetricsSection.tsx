@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card, Row, Col, Statistic, Typography } from 'antd';
-import { DollarOutlined, RiseOutlined, UserOutlined, ShopOutlined, CheckCircleOutlined, FallOutlined } from '@ant-design/icons';
+import { RiseOutlined, UserOutlined, ShopOutlined, FallOutlined } from '@ant-design/icons';
 import { useSuperAdminStore } from '@/store/superAdminStore';
 
 const { Title } = Typography;
@@ -12,32 +12,30 @@ const MetricsSection: React.FC = () => {
     <div>
       <Title level={3}>SaaS-метрики</Title>
       <Row gutter={16}>
-        <Col xs={24} sm={12} lg={4}>
-          <Card>
+        <Col xs={24} sm={12} lg={6}>
+          <Card style={{ height: '100%' }}>
             <Statistic
-              title="MRR (Monthly Recurring Revenue)"
+              title="MRR (ежемесячная выручка)"
               value={stats.mrr}
-              prefix={<DollarOutlined />}
               suffix="₽"
               precision={0}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} lg={4}>
-          <Card>
+        <Col xs={24} sm={12} lg={6}>
+          <Card style={{ height: '100%' }}>
             <Statistic
-              title="ARR (Annual Recurring Revenue)"
+              title="ARR (годовая выручка)"
               value={stats.arr}
-              prefix={<DollarOutlined />}
               suffix="₽"
               precision={0}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} lg={4}>
-          <Card>
+        <Col xs={24} sm={12} lg={6}>
+          <Card style={{ height: '100%' }}>
             <Statistic
-              title="Churn Rate"
+              title="Отток"
               value={stats.churnRate}
               suffix="%"
               precision={1}
@@ -45,10 +43,10 @@ const MetricsSection: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} lg={4}>
-          <Card>
+        <Col xs={24} sm={12} lg={6}>
+          <Card style={{ height: '100%' }}>
             <Statistic
-              title="ARPU (Average Revenue Per User)"
+              title="ARPU (средний доход на пользователя)"
               value={stats.arpu}
               prefix={<UserOutlined />}
               suffix="₽"
@@ -58,31 +56,31 @@ const MetricsSection: React.FC = () => {
         </Col>
       </Row>
       <Row gutter={16} style={{ marginTop: 16 }}>
-        <Col xs={24} sm={12} lg={4}>
-          <Card>
+        <Col xs={24} sm={12} lg={8}>
+          <Card style={{ height: '100%' }}>
             <Statistic
-              title="Active Tenants"
-              value={24}
+              title="Активные"
+              value={stats.activeTenants}
               prefix={<ShopOutlined />}
               valueStyle={{ color: '#52c41a' }}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} lg={4}>
-          <Card>
+        <Col xs={24} sm={12} lg={8}>
+          <Card style={{ height: '100%' }}>
             <Statistic
-              title="New This Month"
-              value={5}
+              title="Новые за месяц"
+              value={stats.newThisMonth}
               prefix={<RiseOutlined />}
               valueStyle={{ color: '#52c41a' }}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} lg={4}>
-          <Card>
+        <Col xs={24} sm={12} lg={8}>
+          <Card style={{ height: '100%' }}>
             <Statistic
-              title="Churned This Month"
-              value={2}
+              title="Отключено за месяц"
+              value={stats.churnedThisMonth}
               prefix={<FallOutlined />}
               valueStyle={{ color: '#ff4d4f' }}
             />

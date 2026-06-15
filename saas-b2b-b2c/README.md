@@ -89,7 +89,7 @@ saas-b2b-b2c/
 │   │   ├── repository/          # Слой доступа к данным
 │   │   ├── services/            # Бизнес-логика
 │   │   └── jobs/                # Фоновые задачи
-│   ├── migrations/              # SQL миграции
+│   
 │   └── Dockerfile.backend
 │
 ├── frontend/                    # Клиентская часть (Next.js)
@@ -103,11 +103,10 @@ saas-b2b-b2c/
 │   │   └── utils/              # Утилиты
 │   └── Dockerfile.frontend
 │
-├── docker-compose.yml           # Продакшн
-├── docker-compose.dev.yml       # Разработка
+├── docker-compose.yml
 ├── nginx.conf                   # Reverse proxy
 ├── config.yaml                  # Конфигурация Go
-└── APIDOCS.md                   # Документация API
+└── .env.example                 # Переменные окружения
 ```
 
 ---
@@ -281,7 +280,7 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 | DELETE | `/checklists/:id` | Удалить чеклист |
 | POST | `/checklists/:id/complete` | Завершить чеклист |
 
-Полная документация API: [APIDOCS.md](./APIDOCS.md)
+Полная документация API: [Postman-коллекция](./Franchise%20SaaS%20API.postman_test_run.json)
 
 ---
 

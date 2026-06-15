@@ -327,6 +327,7 @@ const CommunicationsTab: React.FC = () => {
       title: 'Задача',
       dataIndex: 'title',
       key: 'title',
+      align: 'center',
       width: 200,
       render: (val: string, record: Task) => (
         <Space direction="vertical" size={0}>
@@ -339,6 +340,7 @@ const CommunicationsTab: React.FC = () => {
       title: 'Срок',
       dataIndex: 'dueDate',
       key: 'dueDate',
+      align: 'center',
       width: 120,
       render: (val: string) => {
         const due = dayjs(val);
@@ -354,6 +356,7 @@ const CommunicationsTab: React.FC = () => {
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
+      align: 'center',
       width: 120,
       render: (val: TaskStatus) => {
         const statusMap: Record<TaskStatus, { color: string; text: string }> = {
@@ -369,6 +372,7 @@ const CommunicationsTab: React.FC = () => {
       title: 'Приоритет',
       dataIndex: 'priority',
       key: 'priority',
+      align: 'center',
       width: 100,
       render: (val: TaskPriority) => {
         const priorityMap: Record<TaskPriority, { color: string; text: string }> = {
@@ -382,6 +386,7 @@ const CommunicationsTab: React.FC = () => {
     {
       title: 'Действия',
       key: 'actions',
+      align: 'center',
       width: 150,
       render: (_: any, record: Task) => (
         <Space>
@@ -408,6 +413,7 @@ const CommunicationsTab: React.FC = () => {
       title: 'Тип',
       dataIndex: 'type',
       key: 'type',
+      align: 'center',
       width: 150,
       render: (val: RequestType) => {
         const typeMap: Record<RequestType, string> = {
@@ -423,18 +429,21 @@ const CommunicationsTab: React.FC = () => {
       title: 'Описание',
       dataIndex: 'description',
       key: 'description',
+      align: 'center',
       width: 200,
     },
     {
       title: 'Дата',
       dataIndex: 'sentDate',
       key: 'sentDate',
+      align: 'center',
       width: 100,
     },
     {
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
+      align: 'center',
       width: 150,
       render: (val: RequestStatus) => {
         const statusMap: Record<string, { color: string; text: string }> = {
@@ -451,6 +460,7 @@ const CommunicationsTab: React.FC = () => {
       title: 'Менеджер',
       dataIndex: 'manager',
       key: 'manager',
+      align: 'center',
       width: 150,
     },
   ];
@@ -458,18 +468,18 @@ const CommunicationsTab: React.FC = () => {
   const budgetPercent = marketingBudget ? Math.round((marketingBudget.used / marketingBudget.total) * 100) || 0 : 0;
 
   const budgetTableColumns = [
-    { title: 'Дата', dataIndex: 'date', key: 'date', width: 100 },
-    { title: 'Назначение', dataIndex: 'purpose', key: 'purpose', width: 200 },
-    { title: 'Сумма', dataIndex: 'amount', key: 'amount', render: (val: number) => <Text>{val.toLocaleString()} ₽</Text> },
-    { title: 'Статус', dataIndex: 'status', key: 'status', width: 120, render: (val: string) => { const m: Record<string, string> = { approved: 'Согласовано', pending: 'Ожидает', rejected: 'Отклонено' }; return <Tag color={val === 'approved' ? 'green' : val === 'pending' ? 'orange' : 'red'}>{m[val] || val}</Tag>; } },
+    { title: 'Дата', dataIndex: 'date', key: 'date', align: 'center', width: 100 },
+    { title: 'Назначение', dataIndex: 'purpose', key: 'purpose', align: 'center', width: 200 },
+    { title: 'Сумма', dataIndex: 'amount', key: 'amount', align: 'center', render: (val: number) => <Text>{val.toLocaleString()} ₽</Text> },
+    { title: 'Статус', dataIndex: 'status', key: 'status', align: 'center', width: 120, render: (val: string) => { const m: Record<string, string> = { approved: 'Согласовано', pending: 'Ожидает', rejected: 'Отклонено' }; return <Tag color={val === 'approved' ? 'green' : val === 'pending' ? 'orange' : 'red'}>{m[val] || val}</Tag>; } },
   ];
 
   const interactionColumns = [
-    { title: 'Дата', dataIndex: 'date', key: 'date', width: 100 },
-    { title: 'Тип', dataIndex: 'type', key: 'type', width: 100, render: (val: string) => { const m: Record<string, string> = { call: 'Звонок', meeting: 'Встреча', email: 'Письмо', task: 'Задача', discount: 'Согласование' }; return <Tag>{m[val] || val}</Tag>; } },
-    { title: 'Содержание', dataIndex: 'summary', key: 'summary', width: 200 },
-    { title: 'Результат', dataIndex: 'result', key: 'result', width: 150 },
-    { title: 'Менеджер', dataIndex: 'managerName', key: 'managerName', width: 130 },
+    { title: 'Дата', dataIndex: 'date', key: 'date', align: 'center', width: 100 },
+    { title: 'Тип', dataIndex: 'type', key: 'type', align: 'center', width: 100, render: (val: string) => { const m: Record<string, string> = { call: 'Звонок', meeting: 'Встреча', email: 'Письмо', task: 'Задача', discount: 'Согласование' }; return <Tag>{m[val] || val}</Tag>; } },
+    { title: 'Содержание', dataIndex: 'summary', key: 'summary', align: 'center', width: 200 },
+    { title: 'Результат', dataIndex: 'result', key: 'result', align: 'center', width: 150 },
+    { title: 'Менеджер', dataIndex: 'managerName', key: 'managerName', align: 'center', width: 130 },
   ];
 
   if (loading) {

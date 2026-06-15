@@ -130,11 +130,13 @@ const ChecklistBoard: React.FC<Props> = ({
       title: 'Название',
       dataIndex: 'title',
       key: 'title',
+      align: 'center',
     },
     {
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
+      align: 'center',
       render: (status: string) => {
         const cfg: Record<string, { color: string; text: string }> = {
           pending: { color: 'default', text: 'Новая' },
@@ -150,6 +152,7 @@ const ChecklistBoard: React.FC<Props> = ({
       title: 'Повторение',
       dataIndex: 'recurrence',
       key: 'recurrence',
+      align: 'center',
       render: (r: string) => {
         if (!r) return '-';
         const map: Record<string, string> = {
@@ -164,12 +167,14 @@ const ChecklistBoard: React.FC<Props> = ({
       title: 'Срок',
       dataIndex: 'end_date',
       key: 'end_date',
+      align: 'center',
       render: (date: string) =>
         date ? dayjs(date).format('DD.MM.YYYY HH:mm') : '-',
     },
     {
       title: 'Действия',
       key: 'actions',
+      align: 'center',
       render: (_: any, record: Checklist) => (
         <Space>
           <Button

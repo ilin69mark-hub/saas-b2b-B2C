@@ -1,4 +1,4 @@
-import { useSuperAdminStore, Tenant, AuditLogEntry } from '@/store/superAdminStore';
+import { useSuperAdminStore, Tenant } from '@/store/superAdminStore';
 
 jest.mock('@/api/axiosClient', () => ({
   get: jest.fn(),
@@ -16,9 +16,8 @@ describe('superAdminStore', () => {
   beforeEach(() => {
     useSuperAdminStore.setState({
       activeSection: 'metrics',
-      stats: { mrr: 0, arr: 0, churnRate: 0, overduePayments: 0, arpu: 0 },
+      stats: { mrr: 0, arr: 0, churnRate: 0, overduePayments: 0, arpu: 0, activeTenants: 0, newThisMonth: 0, churnedThisMonth: 0 },
       tenants: [],
-      auditLog: [],
       isLoading: false,
       alertCount: 0,
       lastUpdated: null,
@@ -40,10 +39,6 @@ describe('superAdminStore', () => {
 
     it('has empty tenants array', () => {
       expect(useSuperAdminStore.getState().tenants).toEqual([]);
-    });
-
-    it('has empty auditLog array', () => {
-      expect(useSuperAdminStore.getState().auditLog).toEqual([]);
     });
 
     it('is not loading by default', () => {
@@ -72,7 +67,7 @@ describe('superAdminStore', () => {
 
   describe('setStats', () => {
     it('updates stats with full data', () => {
-      const mockStats = { mrr: 2500000, arr: 30000000, churnRate: 5.2, overduePayments: 150000, arpu: 15000 };
+      const mockStats = { mrr: 2500000, arr: 30000000, churnRate: 5.2, overduePayments: 150000, arpu: 15000, activeTenants: 10, newThisMonth: 2, churnedThisMonth: 1 };
       useSuperAdminStore.getState().setStats(mockStats);
       expect(useSuperAdminStore.getState().stats).toEqual(mockStats);
     });
@@ -92,16 +87,6 @@ describe('superAdminStore', () => {
       useSuperAdminStore.getState().setTenants([{ id: 't1', name: 'Old', slug: 'old', status: 'active', plan: 'Start', mrr: 1000, createdAt: '' }]);
       useSuperAdminStore.getState().setTenants([]);
       expect(useSuperAdminStore.getState().tenants).toHaveLength(0);
-    });
-  });
-
-  describe('setAuditLog', () => {
-    it('sets audit log entries', () => {
-      const log: AuditLogEntry[] = [
-        { id: 'a1', tenantId: 't1', tenantName: 'Tenant 1', action: 'login', userId: 'u1', userName: 'Admin', timestamp: '2026-05-01T10:00:00Z' },
-      ];
-      useSuperAdminStore.getState().setAuditLog(log);
-      expect(useSuperAdminStore.getState().auditLog).toHaveLength(1);
     });
   });
 
@@ -266,52 +251,6 @@ describe('superAdminStore', () => {
         await useSuperAdminStore.getState().deleteTenant('t1');
       } catch {}
       expect(useSuperAdminStore.getState().tenants).toHaveLength(2);
-    });
-  });
-
-  describe('fetchAuditLog', () => {
-    const mockAuditLog: AuditLogEntry[] = [
-      { id: 'a1', tenantId: 't1', tenantName: 'Client A', action: 'user_created', userId: 'u1', userName: 'Admin', timestamp: '2026-05-01T10:00:00Z' },
-      { id: 'a2', tenantId: 't2', tenantName: 'Client B', action: 'plan_upgraded', userId: 'u2', userName: 'Manager', timestamp: '2026-05-02T14:30:00Z' },
-    ];
-
-    it('fetches audit log without filter', async () => {
-      mockApiClient.get.mockResolvedValue({ data: mockAuditLog });
-      await useSuperAdminStore.getState().fetchAuditLog();
-      expect(useSuperAdminStore.getState().auditLog).toHaveLength(2);
-    });
-
-    it('fetches audit log with tenant filter', async () => {
-      mockApiClient.get.mockResolvedValue({ data: [mockAuditLog[0]] });
-      await useSuperAdminStore.getState().fetchAuditLog('t1');
-      expect(mockApiClient.get).toHaveBeenCalledWith('/admin/audit-log', { params: { tenant_id: 't1' } });
-    });
-
-    it('handles empty audit log', async () => {
-      mockApiClient.get.mockResolvedValue({ data: [] });
-      await useSuperAdminStore.getState().fetchAuditLog();
-      expect(useSuperAdminStore.getState().auditLog).toEqual([]);
-    });
-
-    it('sets loading = true during fetch', async () => {
-      mockApiClient.get.mockImplementation(() => new Promise(() => {}));
-      useSuperAdminStore.getState().fetchAuditLog();
-      expect(useSuperAdminStore.getState().isLoading).toBe(true);
-    });
-
-    it('handles API error gracefully', async () => {
-      mockApiClient.get.mockRejectedValue(new Error('Network error'));
-      await useSuperAdminStore.getState().fetchAuditLog();
-      expect(useSuperAdminStore.getState().auditLog).toEqual([]);
-    });
-
-    it('correctly parses audit log entry fields', async () => {
-      mockApiClient.get.mockResolvedValue({ data: mockAuditLog });
-      await useSuperAdminStore.getState().fetchAuditLog();
-      const entry = useSuperAdminStore.getState().auditLog[0];
-      expect(entry.tenantId).toBe('t1');
-      expect(entry.action).toBe('user_created');
-      expect(entry.userName).toBe('Admin');
     });
   });
 

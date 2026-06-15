@@ -60,6 +60,7 @@ func runMigrations(db *gorm.DB) error {
 		migrateTasks,
 		migrateChecklists,
 		migratePlans,
+		migrateSystemSettings,
 		migrateNotifications,
 		migrateInvoices,
 		migrateLeads,
@@ -78,6 +79,7 @@ func runMigrations(db *gorm.DB) error {
 		migrateUnitTemplates,
 		migrateProductInventory,
 		migratePromotions,
+		migrateAuditLogs,
 	}
 
 	for _, m := range migrations {
@@ -171,6 +173,7 @@ func migrateTenants(db *gorm.DB) error {
 	db.Exec(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS target_conversion NUMERIC(5,2) DEFAULT 30`)
 	db.Exec(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS target_extras_percent NUMERIC(5,2) DEFAULT 15`)
 	db.Exec(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS max_bonus NUMERIC(12,2) DEFAULT 50000`)
+	db.Exec(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS daily_leads_norm INTEGER DEFAULT 10`)
 	return nil
 }
 
@@ -297,7 +300,7 @@ func migratePlans(db *gorm.DB) error {
 }
 
 func migrateNotifications(db *gorm.DB) error {
-	return db.Exec(`
+	if err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS notifications (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			user_id UUID NOT NULL,
@@ -307,11 +310,16 @@ func migrateNotifications(db *gorm.DB) error {
 			is_read BOOLEAN DEFAULT FALSE,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
-	`).Error
+	`).Error; err != nil {
+		return err
+	}
+	db.Exec(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tenant_id UUID`)
+	db.Exec(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS data TEXT`)
+	return nil
 }
 
 func migrateInvoices(db *gorm.DB) error {
-	return db.Exec(`
+	if err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS invoices (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			tenant_id UUID NOT NULL,
@@ -320,6 +328,22 @@ func migrateInvoices(db *gorm.DB) error {
 			due_date TIMESTAMP,
 			paid_at TIMESTAMP,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`).Error; err != nil {
+		return err
+	}
+	db.Exec(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS description TEXT`)
+	db.Exec(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'manual'`)
+	db.Exec(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(100)`)
+	return nil
+}
+
+func migrateSystemSettings(db *gorm.DB) error {
+	return db.Exec(`
+		CREATE TABLE IF NOT EXISTS system_settings (
+			key VARCHAR(255) PRIMARY KEY,
+			value TEXT,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
 	`).Error
@@ -589,26 +613,37 @@ func migrateProductInventory(db *gorm.DB) error {
 }
 
 func migratePromotions(db *gorm.DB) error {
-	if err := db.Exec(`
+	return db.Exec(`
 		CREATE TABLE IF NOT EXISTS promotions (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			tenant_id UUID NOT NULL,
-			dealer_id UUID NOT NULL,
-			name VARCHAR(255) NOT NULL,
-			condition TEXT,
-			discount_min INT DEFAULT 0,
-			discount_max INT DEFAULT 0,
-			start_date DATE,
-			end_date DATE,
+			title VARCHAR(255) NOT NULL,
+			description TEXT,
+			discount_type VARCHAR(50) NOT NULL DEFAULT 'percent',
+			discount_value DECIMAL(10,2) NOT NULL,
+			start_date TIMESTAMP NOT NULL,
+			end_date TIMESTAMP NOT NULL,
 			is_active BOOLEAN DEFAULT true,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
-	`).Error; err != nil {
-		return err
-	}
-	db.Exec("CREATE INDEX IF NOT EXISTS idx_promotions_tenant ON promotions(tenant_id)")
-	return nil
+	`).Error
+}
+
+func migrateAuditLogs(db *gorm.DB) error {
+	return db.Exec(`
+		CREATE TABLE IF NOT EXISTS audit_logs (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id UUID,
+			tenant_id UUID,
+			action VARCHAR(100) NOT NULL,
+			entity_type VARCHAR(100),
+			entity_id VARCHAR(255),
+			details TEXT,
+			ip_address VARCHAR(45),
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`).Error
 }
 
 func GetDB() *gorm.DB {

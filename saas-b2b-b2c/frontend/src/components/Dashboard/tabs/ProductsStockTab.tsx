@@ -184,6 +184,7 @@ const ProductsStockTab: React.FC = () => {
       title: 'Название коллекции',
       dataIndex: 'collection',
       key: 'collection',
+      align: 'center',
       fixed: 'left' as const,
       width: 180,
       sorter: (a: InventoryItem, b: InventoryItem) => a.collection.localeCompare(b.collection),
@@ -192,6 +193,7 @@ const ProductsStockTab: React.FC = () => {
       title: 'Категория',
       dataIndex: 'category',
       key: 'category',
+      align: 'center',
       width: 120,
       render: (val: string) => {
         const colors: Record<string, string> = {
@@ -207,6 +209,7 @@ const ProductsStockTab: React.FC = () => {
       title: 'Остаток на складах',
       dataIndex: 'stockWarehouse',
       key: 'stockWarehouse',
+      align: 'center',
       width: 130,
       render: (val: number) => <Tag color={val > 10 ? 'green' : val > 0 ? 'orange' : 'red'}>{val} шт</Tag>,
     },
@@ -214,6 +217,7 @@ const ProductsStockTab: React.FC = () => {
       title: 'На витринах',
       dataIndex: 'onDisplay',
       key: 'onDisplay',
+      align: 'center',
       width: 100,
       render: (val: number) => <Text>{val} шт</Text>,
     },
@@ -221,6 +225,7 @@ const ProductsStockTab: React.FC = () => {
       title: 'Продано за период',
       dataIndex: 'soldPeriod',
       key: 'soldPeriod',
+      align: 'center',
       width: 120,
       render: (val: number) => <Text strong>{val}</Text>,
     },
@@ -228,6 +233,7 @@ const ProductsStockTab: React.FC = () => {
       title: 'Оборачиваемость',
       dataIndex: 'turnoverDays',
       key: 'turnoverDays',
+      align: 'center',
       width: 120,
       render: (val: number, record: InventoryItem) => {
         let color = '#52c41a';
@@ -244,6 +250,7 @@ const ProductsStockTab: React.FC = () => {
       title: 'Общая стоимость',
       dataIndex: 'totalStockValue',
       key: 'totalStockValue',
+      align: 'center',
       width: 140,
       render: (val: number) => <Text strong>{formatCurrency(val)}</Text>,
     },

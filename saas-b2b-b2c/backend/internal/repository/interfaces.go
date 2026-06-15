@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"time"
 
 	"franchise-saas-backend/internal/models"
 
@@ -32,11 +31,6 @@ type TenantRepositoryInterface interface {
 	FindByStatus(ctx context.Context, status string) ([]models.Tenant, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant, error)
 	CountUsersByTenantID(ctx context.Context, tenantID uuid.UUID) (int64, error)
-}
-
-type AuditLogRepositoryInterface interface {
-	FindByFilters(ctx context.Context, tenantID *uuid.UUID, startDate, endDate *time.Time, limit, offset int) ([]models.AuditLog, error)
-	CountByFilters(ctx context.Context, tenantID *uuid.UUID, startDate, endDate *time.Time) (int64, error)
 }
 
 type GoalRepositoryInterface interface {

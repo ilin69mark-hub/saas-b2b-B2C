@@ -2,7 +2,6 @@ package mocks
 
 import (
 	"context"
-	"time"
 
 	"franchise-saas-backend/internal/models"
 
@@ -78,26 +77,5 @@ func (m *MockTenantRepository) FindByID(ctx context.Context, id uuid.UUID) (*mod
 
 func (m *MockTenantRepository) CountUsersByTenantID(ctx context.Context, tenantID uuid.UUID) (int64, error) {
 	args := m.Called(ctx, tenantID)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-type MockAuditLogRepository struct {
-	mock.Mock
-}
-
-func NewMockAuditLogRepository() *MockAuditLogRepository {
-	return &MockAuditLogRepository{}
-}
-
-func (m *MockAuditLogRepository) FindByFilters(ctx context.Context, tenantID *uuid.UUID, startDate, endDate *time.Time, limit, offset int) ([]models.AuditLog, error) {
-	args := m.Called(ctx, tenantID, startDate, endDate, limit, offset)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]models.AuditLog), args.Error(1)
-}
-
-func (m *MockAuditLogRepository) CountByFilters(ctx context.Context, tenantID *uuid.UUID, startDate, endDate *time.Time) (int64, error) {
-	args := m.Called(ctx, tenantID, startDate, endDate)
 	return args.Get(0).(int64), args.Error(1)
 }

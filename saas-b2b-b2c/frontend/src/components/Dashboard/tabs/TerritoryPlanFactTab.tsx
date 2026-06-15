@@ -185,15 +185,15 @@ const TerritoryPlanFactTab: React.FC<TerritoryPlanFactTabProps> = ({ loading }) 
 
   const fmt = (v: number) => Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(v);
   const deviationColumns = [
-    { title: 'Дилер', dataIndex: 'dealerName', key: 'dealerName', render: (n: string, r: DeviationRow) => <Space><ShopOutlined style={{ color: r.deviation >= 0 ? '#52c41a' : '#ff4d4f' }} />{n}</Space> },
-    { title: 'План', dataIndex: 'plan', key: 'plan', render: (v: number) => fmt(v) + ' ₽' },
-    { title: 'Факт', dataIndex: 'fact', key: 'fact', render: (v: number) => fmt(v) + ' ₽' },
-    { title: 'Отклонение', key: 'deviation', render: (_: any, r: DeviationRow) => (
+    { title: 'Дилер', dataIndex: 'dealerName', key: 'dealerName', align: 'center', render: (n: string, r: DeviationRow) => <Space><ShopOutlined style={{ color: r.deviation >= 0 ? '#52c41a' : '#ff4d4f' }} />{n}</Space> },
+    { title: 'План', dataIndex: 'plan', key: 'plan', align: 'center', render: (v: number) => fmt(v) + ' ₽' },
+    { title: 'Факт', dataIndex: 'fact', key: 'fact', align: 'center', render: (v: number) => fmt(v) + ' ₽' },
+    { title: 'Отклонение', key: 'deviation', align: 'center', render: (_: any, r: DeviationRow) => (
       <Tag color={r.deviation >= 0 ? 'green' : 'red'}>
         {fmt(r.deviation)} ₽ ({r.deviationPercent.toFixed(0)}%)
       </Tag>
     )},
-    { title: 'Причина', key: 'reason', render: (_: any, r: DeviationRow) => (
+    { title: 'Причина', key: 'reason', align: 'center', render: (_: any, r: DeviationRow) => (
       <Select
         value={deviationReasons[r.dealerId]}
         onChange={(v) => handleReasonChange(r.dealerId, v)}
@@ -206,8 +206,8 @@ const TerritoryPlanFactTab: React.FC<TerritoryPlanFactTabProps> = ({ loading }) 
         ))}
       </Select>
     )},
-    { title: 'Прогноз', dataIndex: 'forecast', key: 'forecast', render: (v: number) => fmt(v) + ' ₽' },
-    { title: 'Действия', key: 'actions', render: (_: any, r: DeviationRow) => (
+    { title: 'Прогноз', dataIndex: 'forecast', key: 'forecast', align: 'center', render: (v: number) => fmt(v) + ' ₽' },
+    { title: 'Действия', key: 'actions', align: 'center', render: (_: any, r: DeviationRow) => (
       <Space>
         <Input.TextArea
           value={deviationActions[r.dealerId]}

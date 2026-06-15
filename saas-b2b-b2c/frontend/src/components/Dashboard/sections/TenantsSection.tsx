@@ -39,6 +39,7 @@ import {
 import apiClient from '@/api/axiosClient';
 import { useTenantsStore } from '@/store/tenantsStore';
 import dayjs from 'dayjs';
+import PlanList from '../PlanList';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -91,50 +92,24 @@ const TenantsSection: React.FC = () => {
       if (filters.search) params.append('search', filters.search);
 
       const res = await apiClient.get(`/admin/tenants?${params.toString()}`);
-      setTenants(res.data || []);
+      const data = (res.data || []) as Array<Record<string, unknown>>;
+      setTenants(data.map((item: any) => ({
+        id: String(item.id),
+        name: item.name || '',
+        legalEntity: item.legal_entity || undefined,
+        inn: item.inn || undefined,
+        tariff: item.plan_name || '—',
+        dealers: item.dealer_count || 0,
+        users: item.user_count || 0,
+        licenseLimit: item.max_users || 0,
+        mrr: item.mrr || 0,
+        paymentStatus: item.payment_status || 'pending',
+        nextPaymentDate: item.paid_until || '',
+        status: item.status || 'active',
+      })));
     } catch {
-      setTenants([
-        {
-          id: '1',
-          name: 'ООО Техно',
-          legalEntity: 'ООО Техно',
-          inn: '1234567890',
-          tariff: 'Pro',
-          dealers: 10,
-          users: 25,
-          licenseLimit: 30,
-          mrr: 40000,
-          paymentStatus: 'paid',
-          nextPaymentDate: '2026-05-01',
-          status: 'active',
-        },
-        {
-          id: '2',
-          name: 'АО Бизнес',
-          legalEntity: 'АО Бизнес',
-          inn: '0987654321',
-          tariff: 'Enterprise',
-          dealers: 25,
-          users: 80,
-          licenseLimit: 100,
-          mrr: 150000,
-          paymentStatus: 'pending',
-          nextPaymentDate: '2026-05-15',
-          status: 'active',
-        },
-        {
-          id: '3',
-          name: 'ИП Сидоров',
-          tariff: 'Start',
-          dealers: 2,
-          users: 5,
-          licenseLimit: 10,
-          mrr: 5000,
-          paymentStatus: 'overdue',
-          nextPaymentDate: '2026-04-01',
-          status: 'suspended',
-        },
-      ]);
+      setTenants([]);
+      message.error('Ошибка загрузки тенантов');
     } finally {
       setTenantsLoading(false);
     }
@@ -145,16 +120,7 @@ const TenantsSection: React.FC = () => {
       const res = await apiClient.get('/admin/tenants/onboarding');
       setOnboarding(res.data || []);
     } catch {
-      setOnboarding([
-        {
-          id: 'new1',
-          name: 'Новая компания',
-          createdAt: '2026-04-20',
-          step: 'account_created',
-          progress: 25,
-          daysToTtv: 14,
-        },
-      ]);
+      setOnboarding([]);
     }
   };
 
@@ -162,6 +128,7 @@ const TenantsSection: React.FC = () => {
     try {
       await apiClient.post('/admin/tenants', {
         name: values.name,
+        tariff: values.tariff,
         legal_entity: values.legalEntity,
         inn: values.inn,
         max_users: values.licenseLimit ? parseInt(values.licenseLimit, 10) : 10,
@@ -247,17 +214,20 @@ const TenantsSection: React.FC = () => {
       title: 'Название',
       dataIndex: 'name',
       key: 'name',
+      align: 'center',
       sorter: (a: any, b: any) => a.name.localeCompare(b.name),
     },
     {
       title: 'Юрлицо',
       dataIndex: 'legalEntity',
       key: 'legalEntity',
+      align: 'center',
     },
     {
       title: 'Тариф',
       dataIndex: 'tariff',
       key: 'tariff',
+      align: 'center',
       filters: [
         { text: 'Start', value: 'Start' },
         { text: 'Pro', value: 'Pro' },
@@ -269,6 +239,7 @@ const TenantsSection: React.FC = () => {
       title: 'Пользователей',
       dataIndex: 'users',
       key: 'users',
+      align: 'center',
       render: (_: number, record: any) => `${record.users || 0}/${record.licenseLimit || 10}`,
       sorter: (a: any, b: any) => (a.users || 0) - (b.users || 0),
     },
@@ -276,18 +247,28 @@ const TenantsSection: React.FC = () => {
       title: 'MRR',
       dataIndex: 'mrr',
       key: 'mrr',
+      align: 'center',
       render: (v: number) => v ? `${v.toLocaleString()} ₽` : '-',
       sorter: (a: any, b: any) => (a.mrr || 0) - (b.mrr || 0),
+    },
+    {
+      title: 'Оплата',
+      dataIndex: 'paymentStatus',
+      key: 'paymentStatus',
+      align: 'center',
+      render: (v: string) => getPaymentStatusTag(v),
     },
     {
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
+      align: 'center',
       render: (v: string) => getTenantStatusTag(v),
     },
     {
       title: 'Действия',
       key: 'actions',
+      align: 'center',
       render: (_: any, record: any) => (
         <Space>
           <Button
@@ -456,22 +437,27 @@ const TenantsSection: React.FC = () => {
           <Table
             dataSource={onboarding}
             columns={[
-              { title: 'Название', dataIndex: 'name', key: 'name' },
-              { title: 'Создан', dataIndex: 'createdAt', key: 'createdAt', render: (d: string) => dayjs(d).format('DD.MM.YYYY') },
-              { title: 'Этап', dataIndex: 'step', key: 'step', render: (s: string) => getOnboardingStepTag(s) },
+              { title: 'Название', dataIndex: 'name', key: 'name', align: 'center' },
+              { title: 'Создан', dataIndex: 'createdAt', key: 'createdAt', align: 'center', render: (d: string) => dayjs(d).format('DD.MM.YYYY') },
+              { title: 'Этап', dataIndex: 'step', key: 'step', align: 'center', render: (s: string) => getOnboardingStepTag(s) },
               {
                 title: 'Прогресс',
                 dataIndex: 'progress',
                 key: 'progress',
+                align: 'center',
                 render: (p: number) => <Progress percent={p} size="small" />,
               },
-              { title: 'Дней до TTV', dataIndex: 'daysToTtv', key: 'daysToTtv' },
+              { title: 'Дней до TTV', dataIndex: 'daysToTtv', key: 'daysToTtv', align: 'center' },
             ]}
             rowKey="id"
             pagination={false}
           />
         </Card>
       )}
+
+      <Card title="Тарифы и планы" style={{ marginTop: 16 }}>
+        <PlanList />
+      </Card>
 
       <Drawer
         title={selectedTenant?.name || 'Детали тенанта'}
@@ -559,29 +545,9 @@ const TenantsSection: React.FC = () => {
                       <Statistic title="Пользователей" value={selectedTenant?.users || 0} />
                     </Col>
                     <Col span={12}>
-                      <Statistic title="MRR" value={selectedTenant?.mrr || 0} prefix="₽" />
+                      <Statistic title="MRR (ежемесячная выручка)" value={selectedTenant?.mrr || 0} prefix="₽" />
                     </Col>
                   </Row>
-                ),
-              },
-              {
-                key: 'activity',
-                label: 'Активность',
-                children: (
-                  <div>
-                    <Row gutter={16}>
-                      <Col span={12}>
-                        <Card>
-                          <Statistic title="DAU" value={0} />
-                        </Card>
-                      </Col>
-                      <Col span={12}>
-                        <Card>
-                          <Statistic title="MAU" value={0} />
-                        </Card>
-                      </Col>
-                    </Row>
-                  </div>
                 ),
               },
             ]}
@@ -638,18 +604,7 @@ const TenantsSection: React.FC = () => {
         </Form>
       </Modal>
 
-<Modal
-        title="Удалить тенанта"
-        open={showTerminateModal}
-        onCancel={() => setShowTerminateModal(false)}
-        onOk={handleTerminate}
-        okText="Удалить"
-        okButtonProps={{ danger: true }}
-      >
-        <p>Вы уверены? Это действие необратимо.</p>
-      </Modal>
-
-      <Modal
+			<Modal
         title="Расторгнуть договор"
         open={showTerminateModal}
         onCancel={() => setShowTerminateModal(false)}

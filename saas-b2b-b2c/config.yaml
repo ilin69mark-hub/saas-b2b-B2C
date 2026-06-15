@@ -1,8 +1,9 @@
-jwt_secret: my_strong_and_fixed_secret_key_5687456145845656562358957484466445554845454354684534534
+# Database & JWT credentials are set via environment variables:
+#   DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, JWT_SECRET
+# See .env.example for all available variables.
 db_host: franchise-postgres
 db_port: 5432
 db_user: postgres
-db_password: postgres
 db_name: franchise_db
 port: 8080
 cors_allowed_origins:

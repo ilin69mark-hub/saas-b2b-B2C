@@ -184,7 +184,7 @@ func TestLeadService_UpdateStatus_Success(t *testing.T) {
 	mockRepo.On("GetLeadByID", mock.Anything, leadID, managerID).Return(&models.Lead{ID: leadID}, nil)
 	mockRepo.On("UpdateLeadStatus", mock.Anything, leadID, "contact", "").Return(nil)
 
-	err := service.UpdateStatus(context.Background(), managerID, leadID, "contact")
+	err := service.UpdateStatus(context.Background(), managerID, leadID, "contact", "")
 
 	assert.NoError(t, err)
 	mockRepo.AssertExpectations(t)
@@ -199,7 +199,7 @@ func TestLeadService_UpdateStatus_LeadNotFound(t *testing.T) {
 
 	mockRepo.On("GetLeadByID", mock.Anything, leadID, managerID).Return(nil, errors.New("record not found"))
 
-	err := service.UpdateStatus(context.Background(), managerID, leadID, "contact")
+	err := service.UpdateStatus(context.Background(), managerID, leadID, "contact", "")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "record not found")
@@ -216,7 +216,7 @@ func TestLeadService_UpdateStatus_RepoError(t *testing.T) {
 	mockRepo.On("GetLeadByID", mock.Anything, leadID, managerID).Return(&models.Lead{ID: leadID}, nil)
 	mockRepo.On("UpdateLeadStatus", mock.Anything, leadID, "contact", "").Return(errors.New("database error"))
 
-	err := service.UpdateStatus(context.Background(), managerID, leadID, "contact")
+	err := service.UpdateStatus(context.Background(), managerID, leadID, "contact", "")
 
 	assert.Error(t, err)
 	mockRepo.AssertExpectations(t)

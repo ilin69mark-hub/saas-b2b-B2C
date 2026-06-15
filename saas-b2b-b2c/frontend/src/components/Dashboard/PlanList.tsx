@@ -94,29 +94,31 @@ const PlanList: React.FC = () => {
   /*   Таблица – колонки                                                */
   /* ------------------------------------------------------------------ */
   const columns = [
-    { title: 'Название', dataIndex: 'name', key: 'name' },
+    { title: 'Название', dataIndex: 'name', key: 'name', align: 'center' },
     {
       title: 'Цена',
       dataIndex: 'price',
       key: 'price',
+      align: 'center',
       render: (v: number) => `${v} ₽`,
     },
-    { title: 'Салоны', dataIndex: 'max_salons', key: 'max_salons' },
-    { title: 'Пользователи', dataIndex: 'max_users', key: 'max_users' },
+    { title: 'Салоны', dataIndex: 'max_salons', key: 'max_salons', align: 'center' },
+    { title: 'Пользователи', dataIndex: 'max_users', key: 'max_users', align: 'center' },
     {
       title: 'Действия',
       key: 'actions',
+      align: 'center',
       render: (_: any, rec: Plan) => (
         <Space>
           <Button size="small" onClick={() => openEdit(rec)}>
-            Edit
+            Редактировать
           </Button>
           <Popconfirm
             title="Удалить план?"
             onConfirm={() => handleDelete(rec.id)}
           >
             <Button danger size="small">
-              Delete
+              Удалить
             </Button>
           </Popconfirm>
         </Space>

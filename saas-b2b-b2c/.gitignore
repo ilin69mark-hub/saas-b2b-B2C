@@ -35,3 +35,21 @@ Thumbs.db
 # Coverage
 coverage/
 .nyc_output/
+coverage.out
+
+# Compiled binaries
+b80
+backend_bin
+backend/backend
+backend/main
+backend/server
+backend/server_new
+
+# Reports
+backend/reports/*.pdf
+
+# Logs
+logs.txt
+
+# Temp files
+Paid

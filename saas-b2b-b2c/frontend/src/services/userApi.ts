@@ -1,5 +1,5 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
-import type { UserProfile, UpdateProfileRequest, CreateEmployeeRequest, EmployeeResponse, TeamMemberResponse, FranchiserDealersResponse, DealersHealthResponse, DealersMigrationResponse, SystemIssue, DealerGeographyItem, MarketingROIResponse, ReportDataResponse } from '@/types';
+import type { UserProfile, UpdateProfileRequest, CreateEmployeeRequest, EmployeeResponse, Employee, TeamMemberResponse, FranchiserDealersResponse, DealersHealthResponse, DealersMigrationResponse, SystemIssue, DealerGeographyItem, MarketingROIResponse, ReportDataResponse } from '@/types';
 
 export const userApi = createApi({
   reducerPath: 'userApi',
@@ -105,6 +105,23 @@ export const userApi = createApi({
         return { url: 'franchiser/report/data', params: queryParams };
       },
     }),
+
+    updateEmployee: builder.mutation<EmployeeResponse, { id: string; data: Partial<Employee> }>({
+      query: ({ id, data }) => ({
+        url: `users/${id}`,
+        method: 'PUT',
+        body: data,
+      }),
+      invalidatesTags: [{ type: 'Employees' }],
+    }),
+
+    deleteEmployee: builder.mutation<void, string>({
+      query: (id) => ({
+        url: `users/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: [{ type: 'Employees' }],
+    }),
   }),
 });
 
@@ -113,6 +130,8 @@ export const {
   useUpdateProfileMutation,
   useCreateEmployeeMutation,
   useGetEmployeesQuery,
+  useUpdateEmployeeMutation,
+  useDeleteEmployeeMutation,
   useGetFranchiserTeamQuery,
   useGetFranchiserDealersQuery,
   useGetDealersHealthQuery,

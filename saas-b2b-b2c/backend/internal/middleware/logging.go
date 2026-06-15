@@ -1,6 +1,7 @@
 package middleware
 
 import (
+    "fmt"
     "franchise-saas-backend/internal/models"
     "franchise-saas-backend/internal/repository"
     "log"
@@ -47,5 +48,22 @@ func LoggingMiddleware(userRepo *repository.UserRepository) gin.HandlerFunc {
         }
 
         c.Next()
+
+        // Логируем ошибки 4xx/5xx
+        if c.Writer.Status() >= 400 && exists {
+            user := userVal.(*models.User)
+            go func() {
+                logEntry := models.UserLog{
+                    UserID:    &user.ID,
+                    TenantID:  user.TenantID,
+                    Action:    "error",
+                    IPAddress: c.ClientIP(),
+                    UserAgent: fmt.Sprintf("%d | %s %s", c.Writer.Status(), c.Request.Method, path),
+                }
+                if err := userRepo.CreateLog(&logEntry); err != nil {
+                    log.Printf("LoggingMiddleware error: %v", err)
+                }
+            }()
+        }
     }
 }

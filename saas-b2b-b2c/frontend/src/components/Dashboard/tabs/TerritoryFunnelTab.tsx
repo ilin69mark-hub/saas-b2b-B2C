@@ -84,9 +84,9 @@ const TerritoryFunnelTab: React.FC<TerritoryFunnelTabProps> = ({ loading }) => {
   }, [stages]);
 
   const stageColumns = [
-    { title: 'Этап', dataIndex: 'name', key: 'name', render: (name: string) => <Text strong>{name}</Text> },
-    { title: 'Количество', dataIndex: 'count', key: 'count', render: (count: number) => count > 0 ? count : '-' },
-    { title: 'Конверсия', dataIndex: 'conversion', key: 'conversion', render: (conv: number, _: any, i: number) => i > 0 ? `${conv.toFixed(1)}%` : '100%' },
+    { title: 'Этап', dataIndex: 'name', key: 'name', align: 'center', render: (name: string) => <Text strong>{name}</Text> },
+    { title: 'Количество', dataIndex: 'count', key: 'count', align: 'center', render: (count: number) => count > 0 ? count : '-' },
+    { title: 'Конверсия', dataIndex: 'conversion', key: 'conversion', align: 'center', render: (conv: number, _: any, i: number) => i > 0 ? `${conv.toFixed(1)}%` : '100%' },
   ];
 
   return (

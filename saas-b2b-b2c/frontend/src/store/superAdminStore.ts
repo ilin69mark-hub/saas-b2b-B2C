@@ -7,6 +7,9 @@ interface SuperAdminStats {
   churnRate: number;
   overduePayments: number;
   arpu: number;
+  activeTenants: number;
+  newThisMonth: number;
+  churnedThisMonth: number;
 }
 
 export interface Tenant {
@@ -19,22 +22,10 @@ export interface Tenant {
   createdAt: string;
 }
 
-export interface AuditLogEntry {
-  id: string;
-  tenantId: string;
-  tenantName: string;
-  action: string;
-  userId: string;
-  userName: string;
-  timestamp: string;
-  details?: Record<string, unknown>;
-}
-
 interface SuperAdminState {
   activeSection: string;
   stats: SuperAdminStats;
   tenants: Tenant[];
-  auditLog: AuditLogEntry[];
   isLoading: boolean;
   alertCount: number;
   lastUpdated: Date | null;
@@ -42,7 +33,6 @@ interface SuperAdminState {
   setActiveSection: (section: string) => void;
   setStats: (stats: SuperAdminStats) => void;
   setTenants: (tenants: Tenant[]) => void;
-  setAuditLog: (log: AuditLogEntry[]) => void;
   setLoading: (loading: boolean) => void;
   setAlertCount: (count: number) => void;
   setLastUpdated: (date: Date) => void;
@@ -51,16 +41,7 @@ interface SuperAdminState {
   fetchAllTenants: (page?: number, limit?: number) => Promise<void>;
   suspendTenant: (tenantId: string) => Promise<void>;
   deleteTenant: (tenantId: string) => Promise<void>;
-  fetchAuditLog: (tenantId?: string) => Promise<void>;
 }
-
-const mockStats: SuperAdminStats = {
-  mrr: 2500000,
-  arr: 30000000,
-  churnRate: 5.2,
-  overduePayments: 150000,
-  arpu: 15000,
-};
 
 export const useSuperAdminStore = create<SuperAdminState>((set, get) => ({
   activeSection: 'metrics',
@@ -70,9 +51,11 @@ export const useSuperAdminStore = create<SuperAdminState>((set, get) => ({
     churnRate: 0,
     overduePayments: 0,
     arpu: 0,
+    activeTenants: 0,
+    newThisMonth: 0,
+    churnedThisMonth: 0,
   },
   tenants: [],
-  auditLog: [],
   isLoading: false,
   alertCount: 0,
   lastUpdated: null,
@@ -81,7 +64,6 @@ export const useSuperAdminStore = create<SuperAdminState>((set, get) => ({
   setActiveSection: (section) => set({ activeSection: section }),
   setStats: (stats) => set({ stats }),
   setTenants: (tenants) => set({ tenants }),
-  setAuditLog: (log) => set({ auditLog: log }),
   setLoading: (loading) => set({ isLoading: loading }),
   setAlertCount: (count) => set({ alertCount: count }),
   setLastUpdated: (date) => set({ lastUpdated: date }),
@@ -99,10 +81,14 @@ export const useSuperAdminStore = create<SuperAdminState>((set, get) => ({
         churnRate: Number(data.churnRate) || 0,
         overduePayments: Number(data.overduePayments) || 0,
         arpu: Number(data.arpu) || 0,
+        activeTenants: Number(data.active_tenants) || 0,
+        newThisMonth: Number(data.new_this_month) || 0,
+        churnedThisMonth: Number(data.churned_tenants) || 0,
       });
       setLastUpdated(new Date());
-    } catch {
-      setStats({ mrr: 2500000, arr: 30000000, churnRate: 5.2, overduePayments: 150000, arpu: 15000 });
+    } catch (e) {
+      console.error('Error fetching stats:', e);
+      setStats({ mrr: 0, arr: 0, churnRate: 0, overduePayments: 0, arpu: 0, activeTenants: 0, newThisMonth: 0, churnedThisMonth: 0 });
     } finally {
       setLoading(false);
     }
@@ -127,7 +113,7 @@ export const useSuperAdminStore = create<SuperAdminState>((set, get) => ({
   suspendTenant: async (tenantId: string) => {
     const { setTenants, tenants } = get();
     try {
-      await apiClient.patch(`/admin/tenants/${tenantId}/suspend`);
+      await apiClient.post(`/admin/tenants/${tenantId}/block`);
       setTenants(tenants.map(t => t.id === tenantId ? { ...t, status: 'suspended' as const } : t));
     } catch (e) {
       console.error('Error suspending tenant:', e);
@@ -143,21 +129,6 @@ export const useSuperAdminStore = create<SuperAdminState>((set, get) => ({
     } catch (e) {
       console.error('Error deleting tenant:', e);
       throw e;
-    }
-  },
-
-  fetchAuditLog: async (tenantId?: string) => {
-    const { setLoading, setAuditLog } = get();
-    setLoading(true);
-    try {
-      const params = tenantId ? { tenant_id: tenantId } : {};
-      const res = await apiClient.get('/admin/audit-log', { params });
-      setAuditLog(res.data as AuditLogEntry[]);
-    } catch (e) {
-      console.error('Error fetching audit log:', e);
-      setAuditLog([]);
-    } finally {
-      setLoading(false);
     }
   },
 }));

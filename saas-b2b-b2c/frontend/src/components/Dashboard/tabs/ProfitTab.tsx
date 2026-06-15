@@ -173,6 +173,7 @@ const ProfitTab: React.FC<ProfitTabProps> = ({ selectedMonth, onMonthChange }) =
       title: 'Категория',
       dataIndex: 'category',
       key: 'category',
+      align: 'center',
       render: (category: string) => {
         const categoryLabels: Record<string, string> = {
           cogs: 'Себестоимость', rent: 'Аренда', utilities: 'Коммуналка', payroll: 'ФОТ',
@@ -198,17 +199,20 @@ const ProfitTab: React.FC<ProfitTabProps> = ({ selectedMonth, onMonthChange }) =
       title: 'Сумма',
       dataIndex: 'amount',
       key: 'amount',
+      align: 'center',
       render: (val: number) => <Text strong>{val.toLocaleString()} ₽</Text>,
     },
     {
       title: '% от выручки',
       dataIndex: 'percent_of_revenue',
       key: 'percent_of_revenue',
+      align: 'center',
       render: (val: number) => <Text>{val.toFixed(1)}%</Text>,
     },
     {
       title: 'К прошлому месяцу',
       key: 'change',
+      align: 'center',
       render: (_: any, record: ExpenseBreakdown) => {
         const change = record.prev_month_amount > 0 
           ? ((record.amount - record.prev_month_amount) / record.prev_month_amount) * 100 

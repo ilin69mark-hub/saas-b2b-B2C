@@ -84,17 +84,20 @@ const SalonManagerWidget: React.FC = () => {
       title: 'Название', 
       dataIndex: 'name', 
       key: 'name',
+      align: 'center', 
       render: (text: string) => <strong><HomeOutlined style={{marginRight: 8}}/>{text}</strong>
     },
     { 
       title: 'Адрес', 
       dataIndex: 'address', 
-      key: 'address', 
+      key: 'address',
+      align: 'center', 
       ellipsis: true 
     },
         {
       title: 'Менеджер',
       key: 'manager',
+      align: 'center',
       render: (_: any, record: Salon) => {
         
         // Проверяем, есть ли объект manager и есть ли у него first_name
@@ -113,6 +116,7 @@ const SalonManagerWidget: React.FC = () => {
     {
       title: 'Действия',
       key: 'actions',
+      align: 'center',
       width: 220,
       render: (_: any, record: Salon) => (
         <Space>

@@ -97,35 +97,41 @@ const SalonProductsTab: React.FC<SalonProductsTabProps> = ({ user }) => {
       title: '№',
       key: 'index',
       width: 50,
+      align: 'center',
       render: (_: any, __: any, index: number) => <Text strong>{index + 1}</Text>,
     },
     {
       title: 'Модель',
       dataIndex: 'name',
       key: 'name',
+      align: 'center',
       render: (text: string) => <Text strong>{text}</Text>,
     },
     {
       title: 'Коллекция',
       dataIndex: 'collection',
       key: 'collection',
+      align: 'center',
     },
     {
       title: 'Выручка',
       dataIndex: 'revenue',
       key: 'revenue',
+      align: 'center',
       render: (val: number) => <Text strong>{formatMoney(val)} ₽</Text>,
     },
     {
       title: 'Продано',
       dataIndex: 'quantity',
       key: 'quantity',
+      align: 'center',
       render: (val: number) => <Tag color="blue">{val} шт</Tag>,
     },
     {
       title: 'Доля',
       dataIndex: 'share_percent',
       key: 'share_percent',
+      align: 'center',
       render: (val: number) => (
         <div style={{ width: 100 }}>
           <Progress percent={Math.round(val)} size="small" strokeColor="#1890ff" />
@@ -137,6 +143,7 @@ const SalonProductsTab: React.FC<SalonProductsTabProps> = ({ user }) => {
       title: 'Маржа',
       dataIndex: 'margin',
       key: 'margin',
+      align: 'center',
       render: (val: number) => (
         <Tag color={val >= 30 ? 'success' : val >= 20 ? 'warning' : 'error'}>
           {val.toFixed(1)}%
@@ -151,6 +158,7 @@ const SalonProductsTab: React.FC<SalonProductsTabProps> = ({ user }) => {
       title: 'Модель',
       dataIndex: 'name',
       key: 'name',
+      align: 'center',
       render: (text: string, record: StockItem) => (
         <div>
           <Text strong>{text}</Text>
@@ -163,24 +171,28 @@ const SalonProductsTab: React.FC<SalonProductsTabProps> = ({ user }) => {
       title: 'Витрина',
       dataIndex: 'showroom_qty',
       key: 'showroom_qty',
+      align: 'center',
       render: (val: number) => <Tag color="blue">{val} шт</Tag>,
     },
     {
       title: 'Склад',
       dataIndex: 'warehouse_qty',
       key: 'warehouse_qty',
+      align: 'center',
       render: (val: number) => <Tag>{val} шт</Tag>,
     },
     {
       title: 'Стоимость',
       dataIndex: 'total_cost',
       key: 'total_cost',
+      align: 'center',
       render: (val: number) => <Text>{formatMoney(val)} ₽</Text>,
     },
     {
       title: 'Оборачиваемость',
       dataIndex: 'turnover_days',
       key: 'turnover_days',
+      align: 'center',
       render: (days: number) => (
         <Tooltip title={days > 90 ? 'Неликвидный товар (>90 дней)' : 'Норма'}>
           <Tag color={days > 90 ? 'error' : days > 60 ? 'warning' : 'success'}>
@@ -197,6 +209,7 @@ const SalonProductsTab: React.FC<SalonProductsTabProps> = ({ user }) => {
       title: 'Причина',
       dataIndex: 'reason',
       key: 'reason',
+      align: 'center',
       render: (reason: string, record: LostSale) => (
         <div>
           <Text strong>{reason}</Text>
@@ -210,12 +223,14 @@ const SalonProductsTab: React.FC<SalonProductsTabProps> = ({ user }) => {
       title: 'Запросов',
       dataIndex: 'requests_count',
       key: 'requests_count',
+      align: 'center',
       render: (val: number) => <Tag color="orange">{val}</Tag>,
     },
     {
       title: 'Упущенная выручка',
       dataIndex: 'lost_revenue',
       key: 'lost_revenue',
+      align: 'center',
       render: (val: number) => (
         <Tooltip title={val > 100000 ? 'Критичная сумма' : ''}>
           <Text strong style={{ color: val > 100000 ? '#ff4d4f' : undefined }}>
@@ -232,6 +247,7 @@ const SalonProductsTab: React.FC<SalonProductsTabProps> = ({ user }) => {
       title: 'Категория',
       dataIndex: 'category',
       key: 'category',
+      align: 'center',
       render: (cat: string, record: CategoryTurnover) => (
         <div>
           <Text strong>{cat}</Text>
@@ -247,6 +263,7 @@ const SalonProductsTab: React.FC<SalonProductsTabProps> = ({ user }) => {
       title: 'Средняя оборачиваемость',
       dataIndex: 'avg_days',
       key: 'avg_days',
+      align: 'center',
       render: (days: number, record: CategoryTurnover) => (
         <Progress
           percent={(days / 120) * 100}

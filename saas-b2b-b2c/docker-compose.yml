@@ -29,9 +29,9 @@ services:
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=postgres
-      - DB_PASSWORD=postgres
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - DB_NAME=franchise_db
-      - JWT_SECRET=supersecretkeyfordevelopment
+      - JWT_SECRET=${JWT_SECRET:-supersecretkeyfordevelopment}
       - SMTP_HOST=
       - SMTP_PORT=
       - SMTP_USER=
@@ -51,10 +51,10 @@ services:
     environment:
       - POSTGRES_DB=franchise_db
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/migrations:/docker-entrypoint-initdb.d
+
     restart: unless-stopped
 
   redis:

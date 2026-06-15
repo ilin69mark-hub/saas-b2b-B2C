@@ -29,67 +29,58 @@ export const planApi = createApi({
   }),
   tagTypes: ['Plan'],
   endpoints: (builder) => ({
-    /* --------------------- GET /plans --------------------- */
+    /* --------------------- GET /admin/plans --------------------- */
     getPlans: builder.query<
       { items: Plan[]; total: number },
-      {
-        search?: string;
-        page?: number;
-        size?: number;
-        sort?: string;
-        desc?: boolean;
-      }
+      { search?: string; page?: number; size?: number; sort?: string; desc?: boolean } | void
     >({
-      query: (params) => ({
-        url: 'plans',
+      query: () => ({
+        url: 'admin/plans',
         method: 'GET',
-        params,
+      }),
+      transformResponse: (response: Plan[]) => ({
+        items: response,
+        total: response.length,
       }),
       providesTags: (result) =>
         result
           ? [
               { type: 'Plan', id: 'LIST' },
-              ...result.items.map((p) => ({
-                type: 'Plan' as const,
-                id: p.id,
-              })),
+              ...result.items.map((p) => ({ type: 'Plan' as const, id: p.id })),
             ]
           : [{ type: 'Plan', id: 'LIST' }],
     }),
 
-    /* --------------------- POST /plans --------------------- */
+    /* --------------------- POST /admin/plans --------------------- */
     createPlan: builder.mutation<
       Plan,
       Omit<Plan, 'id' | 'created_at' | 'updated_at'>
     >({
       query: (body) => ({
-        url: 'plans',
+        url: 'admin/plans',
         method: 'POST',
         body,
       }),
       invalidatesTags: [{ type: 'Plan', id: 'LIST' }],
     }),
 
-    /* --------------------- PATCH /plans/:id --------------------- */
+    /* --------------------- PATCH /admin/plans/:id --------------------- */
     updatePlan: builder.mutation<Plan, UpdatePlanArg>({
       query: ({ id, ...patch }) => ({
-        url: `plans/${id}`,
+        url: `admin/plans/${id}`,
         method: 'PATCH',
         body: patch,
       }),
-      // Инвалидируем только тот план, который изменили
       invalidatesTags: (result, _error, arg) => [{ type: 'Plan', id: arg.id }],
     }),
 
-    /* --------------------- DELETE /plans/:id --------------------- */
+    /* --------------------- DELETE /admin/plans/:id --------------------- */
     deletePlan: builder.mutation<void, string>({
       query: (id) => ({
-        url: `plans/${id}`,
+        url: `admin/plans/${id}`,
         method: 'DELETE',
       }),
-      // После удаления нужно обновить список
       invalidatesTags: [{ type: 'Plan', id: 'LIST' }],
-      // Сервер не возвращает тело – говорим RTK‑Query, что ответ undefined
       transformResponse: () => undefined,
     }),
   }),

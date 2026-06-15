@@ -138,18 +138,21 @@ const DealerReportTab: React.FC<DealerReportTabProps> = ({
       title: 'Период',
       dataIndex: 'period',
       key: 'period',
+      align: 'center',
       width: 120,
     },
     {
       title: 'Сформирован',
       dataIndex: 'generatedAt',
       key: 'generatedAt',
+      align: 'center',
       width: 150,
     },
     {
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
+      align: 'center',
       width: 100,
       render: (val: string) => (
         <Tag color={val === 'sent' ? 'green' : 'orange'}>
@@ -161,6 +164,7 @@ const DealerReportTab: React.FC<DealerReportTabProps> = ({
       title: 'Отправлен',
       dataIndex: 'sentAt',
       key: 'sentAt',
+      align: 'center',
       width: 150,
       render: (val?: string) => val || '-',
     },

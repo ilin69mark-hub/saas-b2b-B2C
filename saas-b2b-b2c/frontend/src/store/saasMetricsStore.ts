@@ -71,29 +71,6 @@ interface SaasMetricsState {
   fetchPaymentStatus: () => Promise<void>;
 }
 
-const mockOverview: SaasOverview = {
-  mrr: 2500000,
-  mrrChange: 12.5,
-  arr: 30000000,
-  churnRate: 5.2,
-  overdueAmount: 150000,
-  overdueCount: 3,
-  arpu: 15000,
-};
-
-const mockCashflow: CashflowData = {
-  expected: [
-    { date: '2025-05-01', tenant: 'Сеть А', amount: 500000 },
-    { date: '2025-05-15', tenant: 'Сеть Б', amount: 300000 },
-  ],
-  overdue: [
-    { date: '2025-04-01', tenant: 'Сеть В', amount: 100000, daysOverdue: 28 },
-  ],
-  risks: [],
-  totalExpected: 800000,
-  atRisk: 100000,
-};
-
 export const useSaasMetricsStore = create<SaasMetricsState>((set, get) => ({
   activeSection: 'metrics',
   overview: null,
@@ -122,8 +99,8 @@ export const useSaasMetricsStore = create<SaasMetricsState>((set, get) => ({
         overdueCount: Number(data.overdueCount) || mockOverview.overdueCount,
         arpu: Number(data.arpu) || mockOverview.arpu,
       });
-    } catch {
-      setOverview(mockOverview);
+    } catch (e) {
+      console.error('Error fetching analytics:', e);
     } finally {
       setLoading(false);
     }
@@ -159,8 +136,8 @@ export const useSaasMetricsStore = create<SaasMetricsState>((set, get) => ({
         }
       });
       setCashflow({ expected, overdue, risks: [], totalExpected, atRisk });
-    } catch {
-      setCashflow(mockCashflow);
+    } catch (e) {
+      console.error('Error fetching payment status:', e);
     } finally {
       setLoading(false);
     }

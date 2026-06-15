@@ -211,33 +211,34 @@ const AuditSection: React.FC = () => {
   }
 
   const actionColumns = [
-    { title: 'Время', dataIndex: 'timestamp', key: 'timestamp', render: (d: string) => dayjs(d).format('DD.MM HH:mm') },
-    { title: 'Админ', dataIndex: 'adminName', key: 'adminName', render: (_: any, r: any) => `${r.adminName} (${r.adminEmail})` },
-    { title: 'Действие', dataIndex: 'action', key: 'action', render: (a: string) => getActionTag(a) },
-    { title: 'Объект', dataIndex: 'object', key: 'object' },
-    { title: 'Детали', dataIndex: 'details', key: 'details', render: (d: string) => <Text style={{ fontSize: 12 }}>{d}</Text> },
-    { title: 'IP', dataIndex: 'ip', key: 'ip' },
+    { title: 'Время', dataIndex: 'timestamp', key: 'timestamp', align: 'center', render: (d: string) => dayjs(d).format('DD.MM HH:mm') },
+    { title: 'Админ', dataIndex: 'adminName', key: 'adminName', align: 'center', render: (_: any, r: any) => `${r.adminName} (${r.adminEmail})` },
+    { title: 'Действие', dataIndex: 'action', key: 'action', align: 'center', render: (a: string) => getActionTag(a) },
+    { title: 'Объект', dataIndex: 'object', key: 'object', align: 'center' },
+    { title: 'Детали', dataIndex: 'details', key: 'details', align: 'center', render: (d: string) => <Text style={{ fontSize: 12 }}>{d}</Text> },
+    { title: 'IP', dataIndex: 'ip', key: 'ip', align: 'center' },
   ];
 
   const impersonationColumns = [
-    { title: 'Время', dataIndex: 'timestamp', key: 'timestamp', render: (d: string) => dayjs(d).format('DD.MM HH:mm') },
-    { title: 'Админ', dataIndex: 'adminName', key: 'adminName' },
-    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant' },
-    { title: 'Роль', dataIndex: 'role', key: 'role' },
-    { title: 'Пользователь', dataIndex: 'userName', key: 'userName' },
-    { title: 'Длительность', dataIndex: 'duration', key: 'duration', render: (d: number) => `${d} мин` },
-    { title: 'Действий', dataIndex: 'actionsSummary', key: 'actionsSummary' },
-    { title: 'IP', dataIndex: 'ip', key: 'ip' },
+    { title: 'Время', dataIndex: 'timestamp', key: 'timestamp', align: 'center', render: (d: string) => dayjs(d).format('DD.MM HH:mm') },
+    { title: 'Админ', dataIndex: 'adminName', key: 'adminName', align: 'center' },
+    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant', align: 'center' },
+    { title: 'Роль', dataIndex: 'role', key: 'role', align: 'center' },
+    { title: 'Пользователь', dataIndex: 'userName', key: 'userName', align: 'center' },
+    { title: 'Длительность', dataIndex: 'duration', key: 'duration', align: 'center', render: (d: number) => `${d} мин` },
+    { title: 'Действий', dataIndex: 'actionsSummary', key: 'actionsSummary', align: 'center' },
+    { title: 'IP', dataIndex: 'ip', key: 'ip', align: 'center' },
   ];
 
   const sessionColumns = [
-    { title: 'Админ', dataIndex: 'adminName', key: 'adminName' },
-    { title: 'IP', dataIndex: 'ip', key: 'ip' },
-    { title: 'Начало', dataIndex: 'startedAt', key: 'startedAt', render: (d: string) => dayjs(d).format('DD.MM HH:mm') },
-    { title: 'Активность', dataIndex: 'lastActivity', key: 'lastActivity', render: (d: string) => dayjs(d).format('DD.MM HH:mm') },
+    { title: 'Админ', dataIndex: 'adminName', key: 'adminName', align: 'center' },
+    { title: 'IP', dataIndex: 'ip', key: 'ip', align: 'center' },
+    { title: 'Начало', dataIndex: 'startedAt', key: 'startedAt', align: 'center', render: (d: string) => dayjs(d).format('DD.MM HH:mm') },
+    { title: 'Активность', dataIndex: 'lastActivity', key: 'lastActivity', align: 'center', render: (d: string) => dayjs(d).format('DD.MM HH:mm') },
     {
       title: '',
       key: 'actions',
+      align: 'center',
       render: (_: any, r: any) => (
         <Popconfirm title="Завершить сессию?" onConfirm={() => handleTerminateSession(r.id)}>
           <Button size="small" danger icon={<CloseCircleOutlined />}>Завершить</Button>
@@ -247,14 +248,14 @@ const AuditSection: React.FC = () => {
   ];
 
   const loginColumns = [
-    { title: 'Время', dataIndex: 'timestamp', key: 'timestamp', render: (d: string) => dayjs(d).format('DD.MM HH:mm') },
-    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant' },
-    { title: 'Пользователь', render: (_: any, r: any) => `${r.userName} (${r.userEmail})` },
-    { title: 'Роль', dataIndex: 'role', key: 'role' },
-    { title: 'Действие', dataIndex: 'action', key: 'action', render: (a: string) => getLoginActionTag(a) },
-    { title: 'IP', dataIndex: 'ip', key: 'ip' },
-    { title: 'UA', dataIndex: 'userAgent', key: 'userAgent' },
-    { title: 'Гео', dataIndex: 'geo', key: 'geo' },
+    { title: 'Время', dataIndex: 'timestamp', key: 'timestamp', align: 'center', render: (d: string) => dayjs(d).format('DD.MM HH:mm') },
+    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant', align: 'center' },
+    { title: 'Пользователь', align: 'center', render: (_: any, r: any) => `${r.userName} (${r.userEmail})` },
+    { title: 'Роль', dataIndex: 'role', key: 'role', align: 'center' },
+    { title: 'Действие', dataIndex: 'action', key: 'action', align: 'center', render: (a: string) => getLoginActionTag(a) },
+    { title: 'IP', dataIndex: 'ip', key: 'ip', align: 'center' },
+    { title: 'UA', dataIndex: 'userAgent', key: 'userAgent', align: 'center' },
+    { title: 'Гео', dataIndex: 'geo', key: 'geo', align: 'center' },
   ];
 
   return (

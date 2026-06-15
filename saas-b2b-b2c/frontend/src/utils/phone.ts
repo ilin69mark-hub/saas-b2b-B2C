@@ -85,13 +85,4 @@ export const normalizeForApi = (raw: string): string => {
   return d.length === 10 ? `+7${d}` : '';
 };
 
-/**
- * Проверяет, что строка в display-формате.
- */
-export const isDisplayFormat = (raw: string): boolean =>
-  PHONE_DISPLAY_REGEX.test(raw);
 
-/**
- * Проверяет, что строка в API-формате (10 цифр после +7).
- */
-export const isApiFormat = (raw: string): boolean => PHONE_API_REGEX.test(raw);

@@ -20,9 +20,10 @@ type Tenant struct {
     // Лимиты
     MaxUsers int `json:"max_users" gorm:"default:10"`
     
-    // Биллинг
-    PaidUntil       *time.Time `json:"paid_until"`
-    GracePeriodDays int        `json:"grace_period_days" gorm:"default:7"`
+	// Биллинг
+	PaidUntil       *time.Time `json:"paid_until"`
+	TrialEndsAt     *time.Time `json:"trial_ends_at"`
+	GracePeriodDays int        `json:"grace_period_days" gorm:"default:7"`
 
     // Директивы (бенчмарки дилера)
     TargetConversion     float64 `json:"target_conversion" gorm:"default:30"`

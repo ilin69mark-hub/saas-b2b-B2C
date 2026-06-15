@@ -105,6 +105,7 @@ const SalonTeamTab: React.FC<SalonTeamTabProps> = ({ user }) => {
     {
       title: 'Продавец',
       key: 'name',
+      align: 'center',
       sorter: (a: SalesRepMetrics, b: SalesRepMetrics) => a.first_name.localeCompare(b.first_name),
       render: (_: any, record: SalesRepMetrics) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -122,6 +123,7 @@ const SalonTeamTab: React.FC<SalonTeamTabProps> = ({ user }) => {
       title: 'Выручка',
       dataIndex: 'revenue',
       key: 'revenue',
+      align: 'center',
       sorter: (a: SalesRepMetrics, b: SalesRepMetrics) => a.revenue - b.revenue,
       render: (val: number, record: SalesRepMetrics) => (
         <Tooltip title={`Среднее по салону: ${formatMoney(data?.avg_revenue || 0)} ₽`}>
@@ -136,6 +138,7 @@ const SalonTeamTab: React.FC<SalonTeamTabProps> = ({ user }) => {
       title: 'Чеков',
       dataIndex: 'deals_count',
       key: 'deals_count',
+      align: 'center',
       sorter: (a: SalesRepMetrics, b: SalesRepMetrics) => a.deals_count - b.deals_count,
       render: (val: number, record: SalesRepMetrics) => (
         <Tooltip title={`Среднее: ${Math.round((data?.total_revenue || 0) / (data?.sales_reps?.length || 1) / ((data?.avg_check) || 1))} шт`}>
@@ -150,6 +153,7 @@ const SalonTeamTab: React.FC<SalonTeamTabProps> = ({ user }) => {
       title: 'Конверсия',
       dataIndex: 'conversion',
       key: 'conversion',
+      align: 'center',
       sorter: (a: SalesRepMetrics, b: SalesRepMetrics) => a.conversion - b.conversion,
       render: (val: number, record: SalesRepMetrics) => (
         <Tooltip title={`Среднее по салону: ${(data?.avg_conversion || 0).toFixed(1)}%`}>
@@ -169,6 +173,7 @@ const SalonTeamTab: React.FC<SalonTeamTabProps> = ({ user }) => {
       title: 'Средний чек',
       dataIndex: 'avg_check',
       key: 'avg_check',
+      align: 'center',
       sorter: (a: SalesRepMetrics, b: SalesRepMetrics) => a.avg_check - b.avg_check,
       render: (val: number, record: SalesRepMetrics) => (
         <Tooltip title={`Среднее по салону: ${formatMoney(data?.avg_check || 0)} ₽`}>

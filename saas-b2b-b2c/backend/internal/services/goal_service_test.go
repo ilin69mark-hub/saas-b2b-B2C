@@ -56,6 +56,14 @@ func (m *MockGoalRepo) Delete(ctx context.Context, id string) error {
 	return args.Error(0)
 }
 
+func (m *MockGoalRepo) FindByAssigneeAndTargetDate(ctx context.Context, assigneeID uuid.UUID, targetDate time.Time) (*models.Goal, error) {
+	args := m.Called(ctx, assigneeID, targetDate)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Goal), args.Error(1)
+}
+
 func TestGoalService_CreateGoal_Success(t *testing.T) {
 	mockRepo := new(MockGoalRepo)
 	service := NewGoalService(mockRepo)

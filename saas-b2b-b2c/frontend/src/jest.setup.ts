@@ -1,9 +1,4 @@
 import '@testing-library/jest-dom';
-import { server } from './msw/handlers';
-
-beforeAll(() => server.listen());
-afterEach(() => server.resetHandlers());
-afterAll(() => server.close());
 
 jest.mock('next/router', () => ({
   useRouter: () => ({

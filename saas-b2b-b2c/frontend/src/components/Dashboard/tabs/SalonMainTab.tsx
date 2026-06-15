@@ -124,17 +124,20 @@ const SalonMainTab: React.FC<SalonMainTabProps> = ({ user }) => {
       title: 'Клиент',
       dataIndex: 'client_name',
       key: 'client_name',
+      align: 'center',
     },
     {
       title: 'Сумма',
       dataIndex: 'amount',
       key: 'amount',
+      align: 'center',
       render: (val: number) => <Text strong>{formatMoney(val)} ₽</Text>,
     },
     {
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
+      align: 'center',
       render: (status: string) => {
         const statusMap: Record<string, { color: string; label: string }> = {
           awaiting_payment: { color: 'orange', label: 'Ожидает оплаты' },

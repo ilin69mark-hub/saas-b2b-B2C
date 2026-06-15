@@ -106,6 +106,7 @@ const FranchiserNetworkHealthTab: React.FC = () => {
       title: 'Сегмент',
       dataIndex: 'name',
       key: 'name',
+      align: 'center',
       render: (name: string, r: typeof segmentData[0]) => (
         <Tag color={getSegmentColor(r.segment)}>{name}</Tag>
       ),
@@ -114,17 +115,20 @@ const FranchiserNetworkHealthTab: React.FC = () => {
       title: 'Количество',
       dataIndex: 'count',
       key: 'count',
+      align: 'center',
       render: (v: number) => <Text strong>{v}</Text>,
     },
     {
       title: 'Доля выручки',
       dataIndex: 'revenueShare',
       key: 'revenueShare',
+      align: 'center',
       render: (v: number) => `${v}%`,
     },
     {
       title: 'Визуализация',
       key: 'chart',
+      align: 'center',
       render: (_: any, r: typeof segmentData[0]) => (
         <Progress 
           percent={totalDealers > 0 ? Math.round((r.count / totalDealers) * 100) : 0}
@@ -137,9 +141,9 @@ const FranchiserNetworkHealthTab: React.FC = () => {
   ];
 
   const migrationColumns = [
-    { title: 'Из', dataIndex: 'from_segment', key: 'from', render: (s: string) => <Tag color={getSegmentColor(s)}>{s}</Tag> },
-    { title: 'В', dataIndex: 'to_segment', key: 'to', render: (s: string) => <Tag color={getSegmentColor(s)}>{s}</Tag> },
-    { title: 'Дилер', dataIndex: 'dealer_name', key: 'dealer_name' },
+    { title: 'Из', dataIndex: 'from_segment', key: 'from', align: 'center', render: (s: string) => <Tag color={getSegmentColor(s)}>{s}</Tag> },
+    { title: 'В', dataIndex: 'to_segment', key: 'to', align: 'center', render: (s: string) => <Tag color={getSegmentColor(s)}>{s}</Tag> },
+    { title: 'Дилер', dataIndex: 'dealer_name', key: 'dealer_name', align: 'center' },
   ];
 
   const issueColumns = [
@@ -147,24 +151,28 @@ const FranchiserNetworkHealthTab: React.FC = () => {
       title: 'Проблема',
       dataIndex: 'description',
       key: 'description',
+      align: 'center',
       render: (d: string) => <Text>{d}</Text>,
     },
     {
       title: 'Дилер',
       dataIndex: 'dealer_name',
       key: 'dealer_name',
+      align: 'center',
       render: (v: string) => <Text strong>{v}</Text>,
     },
     {
       title: 'Потеряно',
       dataIndex: 'lost_revenue',
       key: 'lost_revenue',
+      align: 'center',
       render: (v: number) => <Text type="danger">{Math.round(v).toLocaleString('ru-RU')} ₽</Text>,
     },
     {
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
+      align: 'center',
       render: (s: string) => (
         <Tag 
           color={s === 'resolved' ? 'green' : s === 'in_progress' ? 'processing' : 'orange'}
@@ -177,10 +185,10 @@ const FranchiserNetworkHealthTab: React.FC = () => {
   ];
 
   const whiteSpotColumns = [
-    { title: 'Город', dataIndex: 'city', key: 'city' },
-    { title: 'Дилеров', dataIndex: 'dealers_count', key: 'dealers_count' },
-    { title: 'Салоны', dataIndex: 'salons_count', key: 'salons_count' },
-    { title: 'Выручка', dataIndex: 'total_revenue', key: 'total_revenue', render: (v: number) => Math.round(v).toLocaleString('ru-RU') + ' ₽' },
+    { title: 'Город', dataIndex: 'city', key: 'city', align: 'center' },
+    { title: 'Дилеров', dataIndex: 'dealers_count', key: 'dealers_count', align: 'center' },
+    { title: 'Салоны', dataIndex: 'salons_count', key: 'salons_count', align: 'center' },
+    { title: 'Выручка', dataIndex: 'total_revenue', key: 'total_revenue', align: 'center', render: (v: number) => Math.round(v).toLocaleString('ru-RU') + ' ₽' },
   ];
 
   return (
@@ -320,7 +328,7 @@ const FranchiserNetworkHealthTab: React.FC = () => {
         <Col span={4}>
           <Card size="small" loading={roiLoading}>
             <Statistic
-              title="ROI"
+              title="ROI (окупаемость инвестиций)"
               value={roiData?.roi ? (roiData.roi * 100).toFixed(0) : 0}
               suffix="%"
               valueStyle={{ fontSize: 18, color: (roiData?.roi || 0) >= 1 ? '#52c41a' : '#fa8c16' }}
@@ -370,7 +378,7 @@ const FranchiserNetworkHealthTab: React.FC = () => {
           <Col span={8}>
             <Card>
               <Statistic
-                title="ROI маркетинга"
+                title="ROI маркетинга (окупаемость инвестиций)"
                 value={roiData?.roi ? (roiData.roi * 100).toFixed(0) : 0}
                 suffix="%"
                 valueStyle={{ fontSize: 24, color: (roiData?.roi || 0) > 1 ? '#52c41a' : '#fa8c16' }}

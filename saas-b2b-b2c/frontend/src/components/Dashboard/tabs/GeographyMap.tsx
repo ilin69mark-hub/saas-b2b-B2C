@@ -15,6 +15,7 @@ const GeographyMap: React.FC<GeographyMapProps> = ({ geography = [] }) => {
       title: 'Город / Адрес',
       dataIndex: 'city',
       key: 'city',
+      align: 'center',
       render: (c: string) => (
         <Text>
           <GlobalOutlined /> {c}
@@ -25,16 +26,19 @@ const GeographyMap: React.FC<GeographyMapProps> = ({ geography = [] }) => {
       title: 'Дилеров',
       dataIndex: 'dealers_count',
       key: 'dealers_count',
+      align: 'center',
     },
     {
       title: 'Салоны',
       dataIndex: 'salons_count',
       key: 'salons_count',
+      align: 'center',
     },
     {
       title: 'Выручка',
       dataIndex: 'total_revenue',
       key: 'total_revenue',
+      align: 'center',
       render: (v: number) => Math.round(v).toLocaleString('ru-RU') + ' ₽',
     },
   ];

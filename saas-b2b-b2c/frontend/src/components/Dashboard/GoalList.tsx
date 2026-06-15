@@ -119,15 +119,16 @@ const GoalList: React.FC<GoalListProps> = ({
   };
 
   const columns = [
-    { title: 'Роль', dataIndex: 'role', key: 'role' },
-    { title: 'Продажи (₽)', dataIndex: 'sales_plan', key: 'sales_plan' },
-    { title: 'Лиды', dataIndex: 'leads_plan', key: 'leads_plan' },
-    { title: 'Звонки', dataIndex: 'calls_plan', key: 'calls_plan' },
-    { title: 'Встречи', dataIndex: 'meetings_plan', key: 'meetings_plan' },
-    { title: 'Период', dataIndex: 'period', key: 'period', render: (p: string) => getPeriodLabel(p) },
+    { title: 'Роль', dataIndex: 'role', key: 'role', align: 'center' },
+    { title: 'Продажи (₽)', dataIndex: 'sales_plan', key: 'sales_plan', align: 'center' },
+    { title: 'Лиды', dataIndex: 'leads_plan', key: 'leads_plan', align: 'center' },
+    { title: 'Звонки', dataIndex: 'calls_plan', key: 'calls_plan', align: 'center' },
+    { title: 'Встречи', dataIndex: 'meetings_plan', key: 'meetings_plan', align: 'center' },
+    { title: 'Период', dataIndex: 'period', key: 'period', align: 'center', render: (p: string) => getPeriodLabel(p) },
     {
       title: 'Даты',
       key: 'dates',
+      align: 'center',
       render: (_: any, rec: Goal) => {
         const start = rec.start_date ? dayjs(rec.start_date).format('DD.MM.YYYY') : '';
         const end = rec.end_date ? dayjs(rec.end_date).format('DD.MM.YYYY') : '';
@@ -138,6 +139,7 @@ const GoalList: React.FC<GoalListProps> = ({
     {
       title: 'Действия',
       key: 'actions',
+      align: 'center',
       render: (_: any, rec: Goal) => (
         <Space>
           <Button size="small" onClick={() => openEdit(rec)}>

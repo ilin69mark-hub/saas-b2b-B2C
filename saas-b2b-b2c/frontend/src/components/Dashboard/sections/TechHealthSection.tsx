@@ -12,6 +12,7 @@ import {
   Button,
   Modal,
   Alert,
+  DatePicker,
 } from 'antd';
 import {
   CheckCircleOutlined,
@@ -19,7 +20,6 @@ import {
   CloseCircleOutlined,
   ApiOutlined,
   ClockCircleOutlined,
-  GlobalOutlined,
   ExclamationCircleOutlined,
   LockOutlined,
   SearchOutlined,
@@ -50,19 +50,26 @@ const TechHealthSection: React.FC = () => {
   } = useTechHealthStore();
 
   const [localLoading, setLocalLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [selectedError, setSelectedError] = useState<any>(null);
+  const [customDateRange, setCustomDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
 
   useEffect(() => {
     fetchData();
-  }, [period]);
+  }, [period, customDateRange]);
 
   const fetchData = async () => {
     setLoading(true);
     setLocalLoading(true);
+    setFetchError(null);
     try {
+      let perfUrl = `/admin/health/performance?period=${period}`;
+      if (period === 'custom' && customDateRange) {
+        perfUrl = `/admin/health/performance?start_date=${customDateRange[0].format('YYYY-MM-DD')}&end_date=${customDateRange[1].format('YYYY-MM-DD')}`;
+      }
       const [statusRes, perfRes, errorsRes, servicesRes, securityRes] = await Promise.all([
         apiClient.get('/admin/health/status'),
-        apiClient.get(`/admin/health/performance?period=${period}`),
+        apiClient.get(perfUrl),
         apiClient.get('/admin/health/errors?limit=50'),
         apiClient.get('/admin/health/services'),
         apiClient.get('/admin/health/security-events?hours=24'),
@@ -73,125 +80,18 @@ const TechHealthSection: React.FC = () => {
       setErrors(errorsRes.data || []);
       setServices(servicesRes.data || []);
       setSecurityEvents(securityRes.data || []);
-    } catch {
-      setStatus({
-        uptime: 99.95,
-        avgResponseTime: 45,
-        p95ResponseTime: 120,
-        p99ResponseTime: 350,
-        errorRate: 0.12,
-        activeWebsockets: 25,
-      });
-
-      const now = dayjs();
-      const perfData = [];
-      for (let i = 287; i >= 0; i -= 5) {
-        perfData.push({
-          timestamp: now.subtract(i, 'minute').toISOString(),
-          avgResponseTime: 30 + Math.floor(Math.random() * 40),
-          p95ResponseTime: 80 + Math.floor(Math.random() * 100),
-          p99ResponseTime: 200 + Math.floor(Math.random() * 200),
-          requestsPerSecond: 100 + Math.floor(Math.random() * 150),
-          errorRate4xx: Math.random() * 0.5,
-          errorRate5xx: Math.random() * 0.2,
-        });
-      }
-      setPerformance(perfData);
-
-      setErrors([
-        {
-          id: '1',
-          timestamp: new Date().toISOString(),
-          code: 500,
-          endpoint: '/api/v1/dealer/summary',
-          tenant: 'ООО Техно',
-          message: 'Internal server error',
-          stackTrace: 'Error: Internal server error at handler...',
-        },
-        {
-          id: '2',
-          timestamp: dayjs().subtract(10, 'minute').toISOString(),
-          code: 503,
-          endpoint: '/api/v1/admin/tenants',
-          message: 'Service unavailable',
-        },
-      ]);
-
-      setServices([
-        {
-          id: '1',
-          name: 'API Gateway',
-          status: 'healthy',
-          cpu: 25,
-          memory: 40,
-          instances: 3,
-          lastDeploy: '2026-04-28',
-          version: 'v1.2.5',
-        },
-        {
-          id: '2',
-          name: 'Auth Service',
-          status: 'healthy',
-          cpu: 15,
-          memory: 30,
-          instances: 2,
-          lastDeploy: '2026-04-27',
-          version: 'v1.1.8',
-        },
-        {
-          id: '3',
-          name: 'Payment Service',
-          status: 'degraded',
-          cpu: 75,
-          memory: 65,
-          instances: 2,
-          lastDeploy: '2026-04-25',
-          version: 'v1.0.3',
-        },
-        {
-          id: '4',
-          name: 'Notification Service',
-          status: 'down',
-          cpu: 0,
-          memory: 0,
-          instances: 0,
-          lastDeploy: '2026-04-20',
-          version: 'v0.9.2',
-        },
-      ]);
-
-      setSecurityEvents([
-        {
-          id: '1',
-          timestamp: dayjs().subtract(2, 'hour').toISOString(),
-          type: 'failed_login',
-          tenant: 'ООО Техно',
-          ip: '192.168.1.100',
-          details: '5 неудачных попыток',
-          count: 5,
-        },
-        {
-          id: '2',
-          timestamp: dayjs().subtract(5, 'hour').toISOString(),
-          type: 'unusual_ip',
-          tenant: 'АО Бизнес',
-          ip: '45.67.89.10',
-          details: 'Вход из новой страны',
-          count: 1,
-        },
-        {
-          id: '3',
-          timestamp: dayjs().subtract(8, 'hour').toISOString(),
-          type: 'mass_requests',
-          tenant: undefined,
-          ip: '10.0.0.55',
-          details: 'Более 1000 запросов в минуту',
-          count: 1200,
-        },
-      ]);
+    } catch (err: any) {
+      setFetchError(err?.message || 'Не удалось загрузить данные');
     } finally {
       setLoading(false);
       setLocalLoading(false);
+    }
+  };
+
+  const onPeriodChange = (val: string) => {
+    setPeriod(val);
+    if (val !== 'custom') {
+      setCustomDateRange(null);
     }
   };
 
@@ -231,14 +131,15 @@ const TechHealthSection: React.FC = () => {
   }
 
   const errorColumns = [
-    { title: 'Время', dataIndex: 'timestamp', key: 'timestamp', render: (d: string) => dayjs(d).format('HH:mm:ss') },
-    { title: 'Код', dataIndex: 'code', key: 'code', render: (c: number) => <Tag color={c >= 500 ? 'red' : 'orange'}>{c}</Tag> },
-    { title: 'Endpoint', dataIndex: 'endpoint', key: 'endpoint' },
-    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant' },
-    { title: 'Сообщение', dataIndex: 'message', key: 'message' },
+    { title: 'Время', dataIndex: 'timestamp', key: 'timestamp', align: 'center', render: (d: string) => dayjs(d).format('HH:mm:ss') },
+    { title: 'Код', dataIndex: 'code', key: 'code', align: 'center', render: (c: number) => <Tag color={c >= 500 ? 'red' : 'orange'}>{c}</Tag> },
+    { title: 'Endpoint', dataIndex: 'endpoint', key: 'endpoint', align: 'center' },
+    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant', align: 'center' },
+    { title: 'Сообщение', dataIndex: 'message', key: 'message', align: 'center' },
     {
       title: '',
       key: 'actions',
+      align: 'center',
       render: (_: any, record: any) => (
         <Button size="small" onClick={() => setSelectedError(record)}>Детали</Button>
       ),
@@ -246,12 +147,13 @@ const TechHealthSection: React.FC = () => {
   ];
 
   const serviceColumns = [
-    { title: 'Сервис', dataIndex: 'name', key: 'name' },
-    { title: 'Статус', dataIndex: 'status', key: 'status', render: (s: string) => getServiceStatusTag(s) },
+    { title: 'Сервис', dataIndex: 'name', key: 'name', align: 'center' },
+    { title: 'Статус', dataIndex: 'status', key: 'status', align: 'center', render: (s: string) => getServiceStatusTag(s) },
     {
       title: 'CPU',
       dataIndex: 'cpu',
       key: 'cpu',
+      align: 'center',
       render: (v: number) => (
         <span style={{ color: v > 80 ? '#ff4d4f' : v > 60 ? '#faad14' : undefined }}>
           {v}%
@@ -262,33 +164,50 @@ const TechHealthSection: React.FC = () => {
       title: 'Memory',
       dataIndex: 'memory',
       key: 'memory',
+      align: 'center',
       render: (v: number) => (
         <span style={{ color: v > 80 ? '#ff4d4f' : v > 60 ? '#faad14' : undefined }}>
           {v}%
         </span>
       ),
     },
-    { title: 'Инстансы', dataIndex: 'instances', key: 'instances' },
-    { title: 'Версия', dataIndex: 'version', key: 'version' },
-    { title: 'Деплой', dataIndex: 'lastDeploy', key: 'lastDeploy' },
+    { title: 'Инстансы', dataIndex: 'instances', key: 'instances', align: 'center' },
+    { title: 'Версия', dataIndex: 'version', key: 'version', align: 'center' },
+    { title: 'Деплой', dataIndex: 'lastDeploy', key: 'lastDeploy', align: 'center' },
   ];
 
   const securityColumns = [
-    { title: 'Время', dataIndex: 'timestamp', key: 'timestamp', render: (d: string) => dayjs(d).format('HH:mm') },
-    { title: 'Тип', dataIndex: 'type', key: 'type', render: (t: string) => getSecurityTypeTag(t) },
-    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant' },
-    { title: 'IP', dataIndex: 'ip', key: 'ip' },
-    { title: 'Детали', dataIndex: 'details', key: 'details' },
-    { title: 'Кол-во', dataIndex: 'count', key: 'count' },
+    { title: 'Время', dataIndex: 'timestamp', key: 'timestamp', align: 'center', render: (d: string) => dayjs(d).format('HH:mm') },
+    { title: 'Тип', dataIndex: 'type', key: 'type', align: 'center', render: (t: string) => getSecurityTypeTag(t) },
+    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant', align: 'center' },
+    { title: 'IP', dataIndex: 'ip', key: 'ip', align: 'center' },
+    { title: 'Детали', dataIndex: 'details', key: 'details', align: 'center' },
+    { title: 'Кол-во', dataIndex: 'count', key: 'count', align: 'center' },
   ];
 
   return (
     <div>
       <Title level={3}>Техническое здоровье</Title>
 
+      {fetchError && (
+        <Alert
+          message="Ошибка загрузки"
+          description={fetchError}
+          type="error"
+          showIcon
+          closable
+          action={
+            <Button size="small" danger onClick={fetchData}>
+              Повторить
+            </Button>
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       <Row gutter={[16, 16]}>
-        <Col xs={12} sm={6}>
-          <Card>
+        <Col xs={24} sm={8} style={{ display: 'flex' }}>
+          <Card style={{ flex: 1 }}>
             <Statistic
               title="Uptime (30 дней)"
               value={status?.uptime || 0}
@@ -299,8 +218,8 @@ const TechHealthSection: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col xs={12} sm={6}>
-          <Card>
+        <Col xs={24} sm={8} style={{ display: 'flex' }}>
+          <Card style={{ flex: 1 }}>
             <Statistic
               title="Response Time (среднее)"
               value={status?.avgResponseTime || 0}
@@ -312,8 +231,8 @@ const TechHealthSection: React.FC = () => {
             </Text>
           </Card>
         </Col>
-        <Col xs={12} sm={6}>
-          <Card>
+        <Col xs={24} sm={8} style={{ display: 'flex' }}>
+          <Card style={{ flex: 1 }}>
             <Statistic
               title="Error Rate (24ч)"
               value={status?.errorRate || 0}
@@ -324,26 +243,24 @@ const TechHealthSection: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col xs={12} sm={6}>
-          <Card>
-            <Statistic
-              title="WebSocket соединений"
-              value={status?.activeWebsockets || 0}
-              prefix={<GlobalOutlined />}
-              valueStyle={{ color: (status?.activeWebsockets || 0) > 0 ? '#52c41a' : '#ff4d4f' }}
-            />
-          </Card>
-        </Col>
       </Row>
 
       <Card title="Производительность" style={{ marginTop: 16 }}>
         <Row gutter={16} style={{ marginBottom: 16 }}>
           <Col>
-            <Select value={period} onChange={setPeriod} style={{ width: 120 }}>
+            <Select value={period} onChange={onPeriodChange} style={{ width: 140 }}>
               <Option value="24h">24 часа</Option>
               <Option value="7d">7 дней</Option>
               <Option value="30d">30 дней</Option>
+              <Option value="custom">Произвольно</Option>
             </Select>
+            {period === 'custom' && (
+              <DatePicker.RangePicker
+                value={customDateRange}
+                onChange={(dates) => setCustomDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs])}
+                style={{ marginLeft: 12 }}
+              />
+            )}
           </Col>
         </Row>
         {performance.length > 0 ? (
@@ -399,15 +316,21 @@ const TechHealthSection: React.FC = () => {
         />
       </Card>
 
-      <Card title="Подозрительная активность" style={{ marginTop: 16 }}>
+      <Card title="Подозрительная активность (демо)" style={{ marginTop: 16 }}>
         {securityEvents.length > 0 ? (
-          <Alert
-            message="Внимание"
-            description="Обнаружена подозрительная активность за последние 24 часа"
-            type="warning"
-            showIcon
-            style={{ marginBottom: 16 }}
-          />
+          <div>
+            <Alert
+              message="Внимание"
+              description={
+                securityEvents.every(e => e.count <= 1)
+                  ? 'Пример данных. Реальные события появятся при подозрительной активности в системе.'
+                  : 'Обнаружена подозрительная активность за последние 24 часа'
+              }
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+          </div>
         ) : null}
         <Table
           dataSource={securityEvents}

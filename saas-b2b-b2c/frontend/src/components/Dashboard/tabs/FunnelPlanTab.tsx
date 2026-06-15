@@ -129,11 +129,11 @@ const FunnelPlanTab: React.FC = () => {
   }, [managerStats]);
 
   const managerGoalColumns = [
-    { title: 'Менеджер', dataIndex: 'name', key: 'name' },
-    { title: 'План продаж', dataIndex: 'sales_plan', key: 'sales_plan', render: (v: number) => v ? `${v.toLocaleString()} ₽` : '—' },
-    { title: 'Целевая конверсия', dataIndex: 'target_conversion', key: 'target_conversion', render: (v: number) => v ? `${v}%` : '—' },
-    { title: 'Доля допов', dataIndex: 'target_extras_percent', key: 'target_extras_percent', render: (v: number) => v ? `${v}%` : '—' },
-    { title: 'Макс. премия', dataIndex: 'max_bonus', key: 'max_bonus', render: (v: number) => v ? `${v.toLocaleString()} ₽` : '—' },
+    { title: 'Менеджер', dataIndex: 'name', key: 'name', align: 'center' },
+    { title: 'План продаж', dataIndex: 'sales_plan', key: 'sales_plan', align: 'center', render: (v: number) => v ? `${v.toLocaleString()} ₽` : '—' },
+    { title: 'Целевая конверсия', dataIndex: 'target_conversion', key: 'target_conversion', align: 'center', render: (v: number) => v ? `${v}%` : '—' },
+    { title: 'Доля допов', dataIndex: 'target_extras_percent', key: 'target_extras_percent', align: 'center', render: (v: number) => v ? `${v}%` : '—' },
+    { title: 'Макс. премия', dataIndex: 'max_bonus', key: 'max_bonus', align: 'center', render: (v: number) => v ? `${v.toLocaleString()} ₽` : '—' },
   ];
 
   const getForecastIcon = (forecast: 'green' | 'yellow' | 'red') => {
@@ -195,6 +195,7 @@ const FunnelPlanTab: React.FC = () => {
       title: 'Название салона',
       dataIndex: 'name',
       key: 'name',
+      align: 'center',
       fixed: 'left' as const,
       width: 180,
     },
@@ -202,18 +203,21 @@ const FunnelPlanTab: React.FC = () => {
       title: 'План (руб.)',
       dataIndex: 'plan',
       key: 'plan',
+      align: 'center',
       render: (val: number) => <Text strong>{val.toLocaleString()} ₽</Text>,
     },
     {
       title: 'Факт (руб.)',
       dataIndex: 'fact',
       key: 'fact',
+      align: 'center',
       render: (val: number) => <Text strong>{val.toLocaleString()} ₽</Text>,
     },
     {
       title: '% выполнения',
       dataIndex: 'percent',
       key: 'percent',
+      align: 'center',
       render: (val: number) => (
         <Progress
           percent={val}
@@ -226,6 +230,7 @@ const FunnelPlanTab: React.FC = () => {
       title: 'Прогноз',
       dataIndex: 'forecast',
       key: 'forecast',
+      align: 'center',
       render: (_: any, record: SalonPlanData) => (
         <span>
           {getForecastIcon(record.forecast)}{' '}
@@ -240,24 +245,28 @@ const FunnelPlanTab: React.FC = () => {
       title: 'ФИО менеджера',
       dataIndex: 'name',
       key: 'name',
+      align: 'center',
       width: 150,
     },
     {
       title: 'Салон',
       dataIndex: 'salon',
       key: 'salon',
+      align: 'center',
       width: 150,
     },
     {
       title: 'Выручка',
       dataIndex: 'revenue',
       key: 'revenue',
+      align: 'center',
       render: (val: number) => <Text strong>{val.toLocaleString()} ₽</Text>,
     },
     {
       title: '% плана',
       dataIndex: 'planPercent',
       key: 'planPercent',
+      align: 'center',
       render: (val: number) => (
         <Tag color={val >= 80 ? 'green' : val >= 50 ? 'orange' : 'red'}>
           {val}%
@@ -268,6 +277,7 @@ const FunnelPlanTab: React.FC = () => {
       title: 'Конверсия',
       dataIndex: 'conversion',
       key: 'conversion',
+      align: 'center',
       render: (val: number) => <Text>{val.toFixed(1)}%</Text>,
     },
   ];

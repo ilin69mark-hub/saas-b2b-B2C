@@ -1,34 +1,10 @@
-// src/components/Dashboard/tabs/UnitEconomyCalculator.tsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, Row, Col, InputNumber, Slider, Typography, Button, Space, Input, Select, message, Divider, Tag } from 'antd';
 import { SaveOutlined, FileTextOutlined, DeleteOutlined, CalculatorOutlined } from '@ant-design/icons';
+import type { UnitEconomyInput, UnitEconomyResult, UnitTemplate } from '@/types';
 
 const { Text, Title } = Typography;
 const { Option } = Select;
-
-export interface UnitEconomyInput {
-  salePrice: number;
-  purchasePrice: number;
-  managerPercent: number;
-  deliveryCost: number;
-  acquiringPercent: number;
-  rentAmortization: number;
-  additionalServices: number;
-}
-
-export interface UnitEconomyResult {
-  marginalProfit: number;
-  netProfit: number;
-  profitability: number;
-  priceAfterDiscount: number;
-}
-
-export interface UnitTemplate {
-  id?: string;
-  name: string;
-  category: 'sofa' | 'kitchen' | 'wardrobe' | 'other';
-  input: UnitEconomyInput;
-}
 
 interface UnitEconomyCalculatorProps {
   templates?: UnitTemplate[];

@@ -1,9 +1,6 @@
 import React, { useEffect, Suspense, lazy, useState } from 'react';
-import { Layout, Row, Col, Card, Typography, Badge, Avatar, Dropdown, Space, Spin, Statistic, Menu, theme } from 'antd';
+import { Layout, Typography, Badge, Space, Spin, Menu, theme } from 'antd';
 import {
-  UserOutlined,
-  LogoutOutlined,
-  SettingOutlined,
   BellOutlined,
   DashboardOutlined,
   ApartmentOutlined,
@@ -16,13 +13,13 @@ import {
   SunOutlined,
   MoonOutlined,
 } from '@ant-design/icons';
-import { useRouter } from 'next/router';
-import { useDispatch } from 'react-redux';
-import { logout } from '@/store/authSlice';
+import apiClient from '@/api/axiosClient';
 import { useThemeMode } from '@/components/ThemeProvider';
 import dayjs from 'dayjs';
 import 'dayjs/locale/ru';
 import { useSuperAdminStore } from '@/store/superAdminStore';
+import UserMenu from './UserMenu';
+import type { User } from '@/types';
 
 dayjs.locale('ru');
 
@@ -36,28 +33,15 @@ const TechHealthSection = lazy(() => import('./sections/TechHealthSection'));
 const BillingSection = lazy(() => import('./sections/BillingSection'));
 const AuditSection = lazy(() => import('./sections/AuditSection'));
 
-interface UserData {
-  id: string;
-  email: string;
-  first_name?: string;
-  last_name?: string;
-  role?: string;
-}
-
 interface SuperAdminDashboardProps {
-  user: UserData;
+  user: User;
 }
 
 const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ user }) => {
-  const router = useRouter();
-  const dispatch = useDispatch();
   const { token } = theme.useToken();
   const {
     activeSection,
-    stats,
-    isLoading,
     alertCount,
-    lastUpdated,
     setActiveSection,
     setStats,
     setLoading,
@@ -83,28 +67,29 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ user }) => {
     const fetchStats = async () => {
       setLoading(true);
       try {
-        const token = localStorage.getItem('accessToken');
-        const res = await fetch('/api/v1/admin/stats', {
-          headers: { Authorization: `Bearer ${token}` },
+        const res = await apiClient.get('/admin/stats');
+        const data = res.data as Record<string, unknown>;
+        setStats({
+          mrr: Number(data.mrr) || 0,
+          arr: Number(data.arr) || 0,
+          churnRate: Number(data.churnRate) || 0,
+          overduePayments: Number(data.overduePayments) || 0,
+          arpu: Number(data.arpu) || 0,
+          activeTenants: Number(data.active_tenants) || 0,
+          newThisMonth: Number(data.new_this_month) || 0,
+          churnedThisMonth: Number(data.churned_tenants) || 0,
         });
-        if (res.ok) {
-          const data = await res.json();
-          setStats({
-            mrr: data.mrr || 0,
-            arr: data.arr || 0,
-            churnRate: data.churnRate || 0,
-            overduePayments: data.overduePayments || 0,
-            arpu: data.arpu || 0,
-          });
-          setAlertCount(data.alerts || 0);
-        }
+        setAlertCount(Number(data.alerts) || 0);
       } catch {
         setStats({
-          mrr: 2500000,
-          arr: 30000000,
-          churnRate: 5.2,
-          overduePayments: 3,
-          arpu: 15000,
+          mrr: 0,
+          arr: 0,
+          churnRate: 0,
+          overduePayments: 0,
+          arpu: 0,
+          activeTenants: 0,
+          newThisMonth: 0,
+          churnedThisMonth: 0,
         });
       } finally {
         setLoading(false);
@@ -117,22 +102,8 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ user }) => {
     return () => clearInterval(updateInterval);
   }, [setStats, setLoading, setLastUpdated]);
 
-  const handleLogout = () => {
-    dispatch(logout());
-    router.push('/login');
-  };
-
   const handleThemeToggle = () => {
     toggleTheme();
-  };
-
-  const userMenu = {
-    items: [
-      { key: 'profile', icon: <UserOutlined />, label: 'Профиль' },
-      { key: 'settings', icon: <SettingOutlined />, label: 'Настройки' },
-      { type: 'divider' as const },
-      { key: 'logout', icon: <LogoutOutlined />, label: 'Выйти', onClick: handleLogout },
-    ],
   };
 
   const menuItems = [
@@ -191,7 +162,7 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ user }) => {
           position: 'sticky',
           top: 0,
           zIndex: 100,
-          height: 64,
+          height: 48,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
@@ -204,68 +175,7 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ user }) => {
           </Text>
         </div>
 
-        <Row gutter={[24, 8]} align="middle" style={{ flex: 1, margin: '0 48px' }}>
-          <Col xs={12} sm={4} lg={3}>
-            <Card size="small" bodyStyle={{ padding: 12 }}>
-              <Statistic
-                title="MRR"
-                value={stats.mrr}
-                precision={0}
-                prefix="₽ "
-                valueStyle={{ fontSize: 16, color: themeName === 'dark' ? '#fff' : undefined }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={4} lg={3}>
-            <Card size="small" bodyStyle={{ padding: 12 }}>
-              <Statistic
-                title="ARR"
-                value={stats.arr}
-                precision={0}
-                prefix="₽ "
-                suffix="/год"
-                valueStyle={{ fontSize: 16, color: themeName === 'dark' ? '#fff' : undefined }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={4} lg={3}>
-            <Card size="small" bodyStyle={{ padding: 12 }}>
-              <Statistic
-                title="Churn Rate"
-                value={stats.churnRate}
-                precision={1}
-                suffix="%"
-                valueStyle={{
-                  fontSize: 16,
-                  color: stats.churnRate > 10 ? '#ff4d4f' : themeName === 'dark' ? '#fff' : undefined,
-                }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={4} lg={3}>
-            <Card size="small" bodyStyle={{ padding: 12 }}>
-              <Statistic
-                title="Просроч. платежи"
-                value={stats.overduePayments}
-                valueStyle={{
-                  fontSize: 16,
-                  color: stats.overduePayments > 0 ? '#ff4d4f' : themeName === 'dark' ? '#fff' : undefined,
-                }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={4} lg={3}>
-            <Card size="small" bodyStyle={{ padding: 12 }}>
-              <Statistic
-                title="ARPU"
-                value={stats.arpu}
-                precision={0}
-                prefix="₽ "
-                valueStyle={{ fontSize: 16, color: themeName === 'dark' ? '#fff' : undefined }}
-              />
-            </Card>
-          </Col>
-        </Row>
+
 
         <Space size="middle">
           <Text type="secondary" style={{ color: themeName === 'dark' ? '#aaa' : undefined }}>
@@ -283,11 +193,7 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ user }) => {
           <span onClick={handleThemeToggle} style={{ cursor: 'pointer', fontSize: 18 }}>
             {themeName === 'dark' ? <SunOutlined /> : <MoonOutlined />}
           </span>
-          <Dropdown menu={userMenu} placement="bottomRight">
-            <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-              <Avatar icon={<UserOutlined />} style={{ backgroundColor: token.colorPrimary }} />
-            </div>
-          </Dropdown>
+          <UserMenu user={user} />
         </Space>
       </AntHeader>
 

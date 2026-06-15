@@ -189,6 +189,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
       title: 'Клиент',
       dataIndex: 'client_name',
       key: 'client_name',
+      align: 'center',
       render: (text: string, record: HotDeal) => (
         <a onClick={() => {
           setSelectedLead(record);
@@ -200,12 +201,14 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
       title: 'Сумма',
       dataIndex: 'amount',
       key: 'amount',
+      align: 'center',
       render: (val: number) => <Text strong>{formatMoney(val)} ₽</Text>,
     },
     {
       title: 'Дата КП',
       dataIndex: 'created_at',
       key: 'created_at',
+      align: 'center',
       render: (val: string) => dayjs(val).format('DD.MM.YYYY'),
       sorter: (a: HotDeal, b: HotDeal) => dayjs(a.created_at).unix() - dayjs(b.created_at).unix(),
     },
@@ -213,6 +216,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
       title: 'Дней без движения',
       dataIndex: 'days_stalled',
       key: 'days_stalled',
+      align: 'center',
       sorter: (a: HotDeal, b: HotDeal) => a.days_stalled - b.days_stalled,
       render: (days: number) => (
         <Tag color={days > 7 ? 'error' : days > 5 ? 'warning' : 'default'}>
@@ -224,6 +228,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
       title: 'Ответственный',
       dataIndex: 'manager_name',
       key: 'manager_name',
+      align: 'center',
       filters: [...new Set((data?.hot_deals || []).map(d => d.manager_name).filter(Boolean))].map(n => ({ text: n, value: n })),
       onFilter: (value: any, record: HotDeal) => record.manager_name === value,
       filterSearch: true,
@@ -237,6 +242,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
       title: 'Источник',
       dataIndex: 'source',
       key: 'source',
+      align: 'center',
       filters: [...new Set((data?.fresh_leads || []).map(d => d.source).filter(Boolean))].map(n => ({ text: n, value: n })),
       onFilter: (value: any, record: FreshLead) => record.source === value,
       filterSearch: true,
@@ -245,17 +251,20 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
       title: 'Клиент',
       dataIndex: 'client_name',
       key: 'client_name',
+      align: 'center',
     },
     {
       title: 'Телефон',
       dataIndex: 'phone',
       key: 'phone',
+      align: 'center',
       render: (val: string) => val ? formatPhone(val) : '-',
     },
     {
       title: 'Время',
       dataIndex: 'created_at',
       key: 'created_at',
+      align: 'center',
       render: (val: string) => dayjs(val).format('DD.MM.YYYY HH:mm'),
       sorter: (a: FreshLead, b: FreshLead) => dayjs(a.created_at).unix() - dayjs(b.created_at).unix(),
     },
@@ -263,6 +272,7 @@ const SalonFunnelTab: React.FC<SalonFunnelTabProps> = ({ user }) => {
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
+      align: 'center',
       filters: [
         { text: 'Не назначен', value: 'unassigned' },
         { text: 'В работе', value: 'in_progress' },

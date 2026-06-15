@@ -1,4 +1,5 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+import type { RootState } from '@/store';
 import {
   User,
   Checklist,
@@ -16,12 +17,9 @@ import dayjs from 'dayjs';
 export const apiSlice = createApi({
   reducerPath: 'api',
   baseQuery: fetchBaseQuery({
-    // Берём URL из env‑переменной (для Docker – имя сервиса `backend`);
-    // fallback – localhost:8080 (для локального старта без Docker)
     baseUrl: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/v1`,
     prepareHeaders: (headers, { getState }) => {
-      // Пытаемся взять токен из Redux‑стора
-      let token = (getState() as any).auth?.accessToken;
+      let token = (getState() as RootState).auth?.accessToken;
 
       // Если в сторе ничего, ищем в localStorage (на случай полной перезагрузки)
       if (!token && typeof window !== 'undefined') {
@@ -409,16 +407,6 @@ export const apiSlice = createApi({
 });
 
 export const {
-  // auth
-  useLoginMutation,
-  useRegisterMutation,
-  useLogoutMutation,
-  useGetProfileQuery,
-
-  // notifications
-  useGetNotificationsQuery,
-  useReadNotificationMutation,
-
   // checklists
   useGetChecklistsQuery,
   useCreateChecklistMutation,
@@ -429,16 +417,10 @@ export const {
   useGetLeadsQuery,
   useCreateLeadMutation,
   useUpdateLeadStatusMutation,
-  useAddLeadActivityMutation,
-
-  // dealers
-  useGetDealersQuery,
 
   // employees
   useGetEmployeesQuery,
   useCreateEmployeeMutation,
-  useUpdateEmployeeMutation,
-  useDeleteEmployeeMutation,
 
   // salons
   useGetSalonsQuery,
@@ -451,52 +433,4 @@ export const {
   useGetUnitTemplatesQuery,
   useCreateUnitTemplateMutation,
   useDeleteUnitTemplateMutation,
-
-  // dealer plan-fact
-  useGetDealerPlanFactQuery,
-
-  // dealer funnel
-  useGetDealerFunnelQuery,
-
-  // dealer benchmark
-  useGetDealerBenchmarkQuery,
-
-  // top managers
-  useGetTopManagersQuery,
-
-  // inventory
-  useGetInventoryQuery,
-
-  // lost sales
-  useGetLostSalesQuery,
-
-  // returns
-  useGetReturnsQuery,
-
-  // tasks
-  useGetTasksQuery,
-  useUpdateTaskStatusMutation,
-  useAddTaskCommentMutation,
-
-  // requests
-  useGetRequestsQuery,
-  useCreateRequestMutation,
-
-  // marketing budget
-  useGetMarketingBudgetQuery,
-
-  // interactions
-  useGetInteractionsQuery,
-
-  // dealer reports
-  useGetReportDataQuery,
-  useCreateReportMutation,
-  useGetReportHistoryQuery,
-
-  // alerts
-  useGetAlertsQuery,
-  useGetUnreadAlertsQuery,
-  useMarkAlertReadMutation,
-  useGetAlertSettingsQuery,
-  useUpdateAlertSettingsMutation,
 } = apiSlice;

@@ -1,10 +1,24 @@
 import { useFranchiserAlertStore, FranchiserAlert, FranchiserAlertSettings } from '@/store/franchiserAlertStore';
 
+const createTestAlert = (id: string): FranchiserAlert => ({
+  id,
+  type: 'plan',
+  severity: 'critical',
+  title: `Test Alert ${id}`,
+  description: 'Description',
+  createdAt: new Date().toISOString(),
+  status: 'new',
+});
+
 describe('franchiserAlertStore', () => {
-  it('has initial alerts', () => {
+  beforeEach(() => {
+    useFranchiserAlertStore.setState({ alerts: [] });
+  });
+
+  it('has initial empty alerts', () => {
     const state = useFranchiserAlertStore.getState();
     expect(state.alerts).toBeDefined();
-    expect(state.alerts.length).toBeGreaterThan(0);
+    expect(state.alerts.length).toBe(0);
   });
 
   it('has default settings', () => {
@@ -15,36 +29,43 @@ describe('franchiserAlertStore', () => {
     expect(state.settings.thresholds.managerKpiPercent).toBe(70);
   });
 
-  it('marks alert as read', () => {
-    const alertId = '1';
-    useFranchiserAlertStore.getState().markAsRead(alertId);
-    const updatedAlert = useFranchiserAlertStore.getState().alerts.find(a => a.id === alertId);
+  it('adds alert and marks as read', () => {
+    const alert = createTestAlert('1');
+    useFranchiserAlertStore.getState().addAlert(alert);
+    useFranchiserAlertStore.getState().markAsRead('1');
+    const updatedAlert = useFranchiserAlertStore.getState().alerts.find(a => a.id === '1');
     expect(updatedAlert?.status).toBe('acknowledged');
   });
 
   it('resolves alert', () => {
-    const alertId = '2';
-    useFranchiserAlertStore.getState().resolveAlert(alertId);
-    const updatedAlert = useFranchiserAlertStore.getState().alerts.find(a => a.id === alertId);
+    const alert = createTestAlert('2');
+    useFranchiserAlertStore.getState().addAlert(alert);
+    useFranchiserAlertStore.getState().resolveAlert('2');
+    const updatedAlert = useFranchiserAlertStore.getState().alerts.find(a => a.id === '2');
     expect(updatedAlert?.status).toBe('resolved');
     expect(updatedAlert?.resolvedAt).toBeDefined();
   });
 
   it('assigns alert to manager', () => {
-    const alertId = '3';
-    useFranchiserAlertStore.getState().assignAlert(alertId, 'Иван Иванов');
-    const updatedAlert = useFranchiserAlertStore.getState().alerts.find(a => a.id === alertId);
+    const alert = createTestAlert('3');
+    useFranchiserAlertStore.getState().addAlert(alert);
+    useFranchiserAlertStore.getState().assignAlert('3', 'Иван Иванов');
+    const updatedAlert = useFranchiserAlertStore.getState().alerts.find(a => a.id === '3');
     expect(updatedAlert?.assignedTo).toBe('Иван Иванов');
   });
 
   it('calculates unread count', () => {
+    const alert = createTestAlert('4');
+    useFranchiserAlertStore.getState().addAlert(alert);
     const count = useFranchiserAlertStore.getState().getUnreadCount();
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBe(1);
   });
 
   it('calculates critical count', () => {
+    const alert = createTestAlert('5');
+    useFranchiserAlertStore.getState().addAlert(alert);
     const count = useFranchiserAlertStore.getState().getCriticalCount();
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBe(1);
   });
 
   it('updates settings', () => {

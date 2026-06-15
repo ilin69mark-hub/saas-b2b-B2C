@@ -39,6 +39,9 @@ func main() {
 	if err := database.SeedUsers(db); err != nil {
 		log.Printf("Seed users error: %v", err)
 	}
+	if err := database.SeedPlans(db); err != nil {
+		log.Printf("Seed plans error: %v", err)
+	}
 	if err := database.SeedChecklists(db); err != nil {
 		log.Printf("Seed checklists error: %v", err)
 	}
@@ -78,6 +81,13 @@ func main() {
 	c := cron.New()
 	paymentJob := jobs.NewPaymentJob(adminService, notifService)
 	c.AddFunc("0 0 9 * * *", paymentJob.Run)
+
+	autoInvoiceJob := jobs.NewAutoInvoiceJob(adminService)
+	c.AddFunc("0 0 9 * * *", autoInvoiceJob.Run)
+
+	autoSuspendJob := jobs.NewAutoSuspendJob(adminService)
+	c.AddFunc("0 30 9 * * *", autoSuspendJob.Run)
+
 	c.Start()
 	defer c.Stop()
 	log.Println("Cron jobs started")
@@ -96,6 +106,8 @@ func main() {
 
 	r := gin.Default()
 	r.Use(middleware.CORS())
+	r.Use(middleware.ResponseTimer())
+	r.Use(middleware.SecurityLogger(db))
 
 	if err := validation.RegisterValidators(); err != nil {
 		log.Printf("Warning: failed to register custom validators: %v", err)
@@ -275,7 +287,6 @@ func main() {
 		protected.PUT("/salons/:id", userHandler.UpdateSalon)
 		protected.DELETE("/salons/:id", userHandler.DeleteSalon)
 
-		handlers.NewPlanHandler(protected, planService)
 	}
 
 	admin := api.Group("/admin")
@@ -292,21 +303,43 @@ func main() {
 
 		admin.GET("/tenants", adminHandler.GetAllTenants)
 		admin.GET("/tenants/payments", adminHandler.GetTenantsPaymentStatus)
+		admin.GET("/tenants/onboarding", adminHandler.GetOnboarding)
 		admin.GET("/tenants/:id", adminHandler.GetTenantByID)
 		admin.POST("/tenants", adminHandler.CreateTenant)
 		admin.PUT("/tenants/:id", adminHandler.UpdateTenant)
 		admin.POST("/tenants/:id/block", adminHandler.BlockTenant)
 		admin.POST("/tenants/:id/unblock", adminHandler.UnblockTenant)
+		admin.POST("/tenants/:id/impersonate", adminHandler.ImpersonateTenant)
 		admin.DELETE("/tenants/:id", adminHandler.DeleteTenant)
-
-		admin.GET("/plans", adminHandler.GetAllPlans)
-		admin.POST("/plans", adminHandler.CreatePlan)
-		admin.PUT("/plans/:id", adminHandler.UpdatePlan)
-		admin.DELETE("/plans/:id", adminHandler.DeletePlan)
 
 		admin.POST("/invoices", adminHandler.CreateInvoice)
 		admin.GET("/invoices", adminHandler.GetAllInvoices)
 		admin.PUT("/invoices/:id/pay", adminHandler.PayInvoice)
+
+		admin.GET("/activity/overview", adminHandler.GetActivityOverview)
+		admin.GET("/activity/dynamics", adminHandler.GetActivityDynamics)
+		admin.GET("/activity/by-tenant", adminHandler.GetActivityByTenant)
+		admin.GET("/activity/feature-adoption", adminHandler.GetFeatureAdoption)
+		admin.GET("/activity/ttv", adminHandler.GetTimeToValue)
+
+		admin.GET("/health/status", adminHandler.GetHealthStatus)
+		admin.GET("/health/performance", adminHandler.GetHealthPerformance)
+		admin.GET("/health/errors", adminHandler.GetHealthErrors)
+		admin.GET("/health/services", adminHandler.GetHealthServices)
+		admin.GET("/health/security-events", adminHandler.GetHealthSecurityEvents)
+
+		admin.GET("/billing/settings", adminHandler.GetBillingSettings)
+		admin.PUT("/billing/settings", adminHandler.UpdateBillingSettings)
+		admin.GET("/billing/history", adminHandler.GetBillingHistory)
+		admin.POST("/billing/payments", adminHandler.CreatePayment)
+
+	handlers.NewPlanHandler(admin, planService)
+
+	admin.GET("/audit/admin-actions", adminHandler.GetAdminActions)
+	admin.GET("/audit/impersonations", adminHandler.GetImpersonations)
+		admin.GET("/audit/active-sessions", adminHandler.GetActiveSessions)
+		admin.GET("/audit/user-logins", adminHandler.GetUserLogins)
+		admin.POST("/audit/terminate-session/:id", adminHandler.TerminateSession)
 	}
 
 	port := viper.GetString("server.port")

@@ -2,8 +2,6 @@ import {
   formatPhone,
   extractDigits,
   normalizeForApi,
-  isDisplayFormat,
-  isApiFormat,
   PHONE_DISPLAY_FORMAT,
 } from '@/utils/phone';
 
@@ -85,43 +83,4 @@ describe('phone utils', () => {
     });
   });
 
-  describe('isDisplayFormat', () => {
-    it('accepts exact display format', () => {
-      expect(isDisplayFormat('+7(999)-123-45-67')).toBe(true);
-    });
-
-    it('rejects partial display format', () => {
-      expect(isDisplayFormat('+7(999)-123')).toBe(false);
-    });
-
-    it('rejects API format', () => {
-      expect(isDisplayFormat('+79991234567')).toBe(false);
-    });
-
-    it('rejects empty string', () => {
-      expect(isDisplayFormat('')).toBe(false);
-    });
   });
-
-  describe('isApiFormat', () => {
-    it('accepts exact API format', () => {
-      expect(isApiFormat('+79991234567')).toBe(true);
-    });
-
-    it('rejects 9 digits after +7', () => {
-      expect(isApiFormat('+7999123456')).toBe(false);
-    });
-
-    it('rejects 11 digits after +7', () => {
-      expect(isApiFormat('+799912345678')).toBe(false);
-    });
-
-    it('rejects without +7', () => {
-      expect(isApiFormat('89991234567')).toBe(false);
-    });
-
-    it('rejects display format', () => {
-      expect(isApiFormat('+7(999)-123-45-67')).toBe(false);
-    });
-  });
-});

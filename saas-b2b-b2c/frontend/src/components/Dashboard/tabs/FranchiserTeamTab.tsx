@@ -189,6 +189,7 @@ const FranchiserTeamTab: React.FC = () => {
       title: 'Менеджер',
       dataIndex: 'name',
       key: 'name',
+      align: 'center',
       render: (name: string) => (
         <Space>
           <TeamOutlined />
@@ -304,6 +305,7 @@ const FranchiserTeamTab: React.FC = () => {
       title: 'Дилер',
       dataIndex: 'name',
       key: 'name',
+      align: 'center',
       render: (name: string) => (
         <Space>
           <UserOutlined />
@@ -315,11 +317,13 @@ const FranchiserTeamTab: React.FC = () => {
       title: 'Email',
       dataIndex: 'email',
       key: 'email',
+      align: 'center',
     },
     {
       title: 'Менеджер',
       dataIndex: 'manager_name',
       key: 'manager_name',
+      align: 'center',
       render: (v: string) => v || '—',
     },
     {

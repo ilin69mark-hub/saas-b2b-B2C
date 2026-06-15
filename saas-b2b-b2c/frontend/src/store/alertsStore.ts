@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import apiClient from '@/api/axiosClient';
 
 interface Alert {
   id: string;
@@ -44,24 +45,29 @@ export const useAlertStore = create<AlertState>((set, get) => ({
   loadAlerts: async () => {
     set({ isLoading: true });
     try {
-      const res = await fetch('/api/admin/alerts/unread');
-      const data = await res.json();
-      get().setAlerts(data);
+      const res = await apiClient.get('/admin/alerts/unread');
+      get().setAlerts(res.data);
+    } catch {
+      // silently fail — endpoint may not exist yet
     } finally {
       set({ isLoading: false });
     }
   },
   markAsRead: async (id: string) => {
-    await fetch(`/api/admin/alerts/${id}/read`, { method: 'PATCH' });
-    const alerts = get().alerts.map(a => a.id === id ? { ...a, read: true } : a);
-    get().setAlerts(alerts);
+    try {
+      await apiClient.patch(`/admin/alerts/${id}/read`);
+      const alerts = get().alerts.map(a => a.id === id ? { ...a, read: true } : a);
+      get().setAlerts(alerts);
+    } catch {
+      // silently fail
+    }
   },
   updateSettings: async (settings: Partial<AlertSettings>) => {
-    await fetch('/api/admin/alert-settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    });
-    get().loadAlerts();
+    try {
+      await apiClient.put('/admin/alerts/settings', settings);
+      get().loadAlerts();
+    } catch {
+      // silently fail
+    }
   },
 }));

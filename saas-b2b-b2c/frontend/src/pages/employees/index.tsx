@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Table, Button, Space, Modal, Form, Input, Select, message, Popconfirm } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
-import { EmployeeApi } from '@/api/employee';
+import { useGetEmployeesQuery, useCreateEmployeeMutation, useUpdateEmployeeMutation, useDeleteEmployeeMutation } from '@/services/userApi';
 import { Employee } from '@/types';
 import PhoneInput from '@/components/common/PhoneInput';
 import { normalizeForApi } from '@/utils/phone';
@@ -9,84 +9,60 @@ import { normalizeForApi } from '@/utils/phone';
 const { Option } = Select;
 
 const EmployeesPage: React.FC = () => {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { data: employees, isLoading, refetch } = useGetEmployeesQuery();
+  const [createEmployee, { isLoading: isCreating }] = useCreateEmployeeMutation();
+  const [updateEmployee, { isLoading: isUpdating }] = useUpdateEmployeeMutation();
+  const [deleteEmployee] = useDeleteEmployeeMutation();
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [form] = Form.useForm();
 
-  // Загрузка данных
-  const fetchEmployees = async () => {
-    setLoading(true);
-    try {
-      const data = await EmployeeApi.getAll();
-      setEmployees(data);
-    } catch (error) {
-      message.error('Не удалось загрузить список сотрудников');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchEmployees();
-  }, []);
-
-  // Открыть модалку создания
   const showCreateModal = () => {
     setEditingEmployee(null);
     form.resetFields();
     setIsModalVisible(true);
   };
 
-  // Открыть модалку редактирования
   const showEditModal = (record: Employee) => {
     setEditingEmployee(record);
     form.setFieldsValue(record);
     setIsModalVisible(true);
   };
 
-  // Обработка сохранения (Создание или Обновление)
   const handleOk = async () => {
     try {
       const values = await form.validateFields();
       const normalized = { ...values, phone: normalizeForApi(String(values.phone || '')) };
       if (editingEmployee) {
-        // Обновление
-        await EmployeeApi.update(editingEmployee.id, normalized);
+        await updateEmployee({ id: editingEmployee.id, data: normalized }).unwrap();
         message.success('Сотрудник обновлен');
       } else {
-        // Создание
-        await EmployeeApi.create(normalized);
+        await createEmployee(normalized).unwrap();
         message.success('Сотрудник создан');
       }
       setIsModalVisible(false);
-      fetchEmployees(); // Обновляем таблицу
     } catch (error) {
       message.error('Ошибка при сохранении');
     }
   };
 
-  // Удаление
   const handleDelete = async (id: string) => {
     try {
-      await EmployeeApi.delete(id);
+      await deleteEmployee(id).unwrap();
       message.success('Сотрудник удален');
-      fetchEmployees();
     } catch (error) {
       message.error('Ошибка при удалении');
     }
   };
 
-  // Колонки таблицы
   const columns = [
     { title: 'Имя', dataIndex: 'first_name', key: 'first_name' },
     { title: 'Фамилия', dataIndex: 'last_name', key: 'last_name' },
     { title: 'Email', dataIndex: 'email', key: 'email' },
     { title: 'Телефон', dataIndex: 'phone', key: 'phone' },
-    { 
-      title: 'Роль', 
-      dataIndex: 'role', 
+    {
+      title: 'Роль',
+      dataIndex: 'role',
       key: 'role',
       render: (role: string) => {
         const roleMap: Record<string, string> = {
@@ -103,8 +79,8 @@ const EmployeesPage: React.FC = () => {
       key: 'actions',
       render: (_: any, record: Employee) => (
         <Space>
-          <Button 
-            icon={<EditOutlined />} 
+          <Button
+            icon={<EditOutlined />}
             onClick={() => showEditModal(record)}
           />
           <Popconfirm
@@ -129,11 +105,11 @@ const EmployeesPage: React.FC = () => {
         </Button>
       </div>
 
-      <Table 
-        dataSource={employees} 
-        columns={columns} 
-        rowKey="id" 
-        loading={loading}
+      <Table
+        dataSource={employees}
+        columns={columns}
+        rowKey="id"
+        loading={isLoading}
       />
 
       <Modal
@@ -141,6 +117,7 @@ const EmployeesPage: React.FC = () => {
         visible={isModalVisible}
         onOk={handleOk}
         onCancel={() => setIsModalVisible(false)}
+        confirmLoading={isCreating || isUpdating}
         okText="Сохранить"
         cancelText="Отмена"
       >
@@ -168,7 +145,6 @@ const EmployeesPage: React.FC = () => {
             <Input disabled={!!editingEmployee} />
           </Form.Item>
 
-          {/* Пароль только при создании */}
           {!editingEmployee && (
             <Form.Item
               name="password"

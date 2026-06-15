@@ -15,6 +15,7 @@ import {
   Spin,
   Tag,
   Statistic,
+  Alert,
   message,
 } from 'antd';
 import {
@@ -24,7 +25,6 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
-  SendOutlined,
 } from '@ant-design/icons';
 import apiClient from '@/api/axiosClient';
 import { useBillingStore } from '@/store/billingStore';
@@ -53,6 +53,7 @@ const BillingSection: React.FC = () => {
   } = useBillingStore();
 
   const [localLoading, setLocalLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [invoiceForm] = Form.useForm();
   const [paymentForm] = Form.useForm();
   const [filters, setFilters] = useState({ status: '', search: '', tenant: '' });
@@ -64,9 +65,10 @@ const BillingSection: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     setLocalLoading(true);
+    setFetchError(null);
     try {
       const [invoicesRes, settingsRes, historyRes] = await Promise.all([
-        apiClient.get(`/admin/billing/invoices?period=${period}`),
+        apiClient.get(`/admin/invoices?period=${period}`),
         apiClient.get('/admin/billing/settings'),
         apiClient.get(`/admin/billing/history?months=12`),
       ]);
@@ -74,53 +76,8 @@ const BillingSection: React.FC = () => {
       setInvoices(invoicesRes.data || []);
       setSettings(settingsRes.data || {});
       setHistory(historyRes.data || []);
-    } catch {
-      setInvoices([
-        {
-          id: '1',
-          tenant: 'ООО Техно',
-          invoiceNumber: 'INV-2026-001',
-          period: 'Апрель 2026',
-          amount: 40000,
-          issuedAt: '2026-04-01',
-          paidAt: '2026-04-05',
-          status: 'paid',
-          paymentMethod: 'auto',
-        },
-        {
-          id: '2',
-          tenant: 'АО Бизнес',
-          invoiceNumber: 'INV-2026-002',
-          period: 'Апрель 2026',
-          amount: 150000,
-          issuedAt: '2026-04-01',
-          status: 'pending',
-          paymentMethod: 'manual',
-        },
-        {
-          id: '3',
-          tenant: 'ИП Сидоров',
-          invoiceNumber: 'INV-2026-003',
-          period: 'Март 2026',
-          amount: 5000,
-          issuedAt: '2026-03-01',
-          status: 'overdue',
-          paymentMethod: 'manual',
-        },
-      ]);
-
-      setSettings({
-        notifyAfterDays: 3,
-        secondNotifyAfterDays: 7,
-        suspendAfterDays: 14,
-        autoInvoiceDays: 3,
-      });
-
-      setHistory([
-        { id: '1', date: '2026-04-05', tenant: 'ООО Техно', amount: 40000, type: 'income' },
-        { id: '2', date: '2026-03-28', tenant: 'АО Бизнес', amount: 150000, type: 'income' },
-        { id: '3', date: '2026-03-15', tenant: 'ИП Сидоров', amount: 5000, type: 'income' },
-      ]);
+    } catch (err: any) {
+      setFetchError(err?.message || 'Не удалось загрузить данные биллинга');
     } finally {
       setLoading(false);
       setLocalLoading(false);
@@ -129,7 +86,7 @@ const BillingSection: React.FC = () => {
 
   const handleCreateInvoice = async (values: any) => {
     try {
-      await apiClient.post('/admin/billing/invoices', values);
+      await apiClient.post('/admin/invoices', values);
       message.success('Счёт выставлен');
       setShowInvoiceModal(false);
       invoiceForm.resetFields();
@@ -197,25 +154,25 @@ const BillingSection: React.FC = () => {
   });
 
   const invoiceColumns = [
-    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant' },
-    { title: 'Счёт', dataIndex: 'invoiceNumber', key: 'invoiceNumber' },
-    { title: 'Период', dataIndex: 'period', key: 'period' },
-    { title: 'Сумма', dataIndex: 'amount', key: 'amount', render: (v: number) => `${v.toLocaleString()} ₽` },
-    { title: 'Выставлен', dataIndex: 'issuedAt', key: 'issuedAt', render: (d: string) => dayjs(d).format('DD.MM.YYYY') },
-    { title: 'Оплачен', dataIndex: 'paidAt', key: 'paidAt', render: (d: string) => d ? dayjs(d).format('DD.MM.YYYY') : '-' },
-    { title: 'Статус', dataIndex: 'status', key: 'status', render: (s: string) => getStatusTag(s) },
-    { title: 'Способ', dataIndex: 'paymentMethod', key: 'paymentMethod', render: (m: string) => getPaymentMethodTag(m) },
+    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant', align: 'center' },
+    { title: 'Счёт', dataIndex: 'invoiceNumber', key: 'invoiceNumber', align: 'center' },
+    { title: 'Период', dataIndex: 'period', key: 'period', align: 'center' },
+    { title: 'Сумма', dataIndex: 'amount', key: 'amount', align: 'center', render: (v: number) => `${v.toLocaleString()} ₽` },
+    { title: 'Выставлен', dataIndex: 'issuedAt', key: 'issuedAt', align: 'center', render: (d: string) => dayjs(d).format('DD.MM.YYYY') },
+    { title: 'Оплачен', dataIndex: 'paidAt', key: 'paidAt', align: 'center', render: (d: string) => d ? dayjs(d).format('DD.MM.YYYY') : '-' },
+    { title: 'Статус', dataIndex: 'status', key: 'status', align: 'center', render: (s: string) => getStatusTag(s) },
+    { title: 'Способ', dataIndex: 'paymentMethod', key: 'paymentMethod', align: 'center', render: (m: string) => getPaymentMethodTag(m) },
   ];
 
   const historyColumns = [
-    { title: 'Дата', dataIndex: 'date', key: 'date', render: (d: string) => dayjs(d).format('DD.MM.YYYY') },
-    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant' },
-    { title: 'Сумма', dataIndex: 'amount', key: 'amount', render: (v: number, r: any) => (
+    { title: 'Дата', dataIndex: 'date', key: 'date', align: 'center', render: (d: string) => dayjs(d).format('DD.MM.YYYY') },
+    { title: 'Тенант', dataIndex: 'tenant', key: 'tenant', align: 'center' },
+    { title: 'Сумма', dataIndex: 'amount', key: 'amount', align: 'center', render: (v: number, r: any) => (
       <span style={{ color: r.type === 'income' ? '#52c41a' : '#ff4d4f' }}>
         {r.type === 'income' ? '+' : '-'}{v.toLocaleString()} ₽
       </span>
     )},
-    { title: 'Тип', dataIndex: 'type', key: 'type', render: (t: string) => <Tag color={t === 'income' ? 'green' : 'red'}>{t === 'income' ? 'Поступление' : 'Возврат'}</Tag> },
+    { title: 'Тип', dataIndex: 'type', key: 'type', align: 'center', render: (t: string) => <Tag color={t === 'income' ? 'green' : 'red'}>{t === 'income' ? 'Поступление' : 'Возврат'}</Tag> },
   ];
 
   const totalIncome = history.filter(h => h.type === 'income').reduce((acc, h) => acc + h.amount, 0);
@@ -224,6 +181,22 @@ const BillingSection: React.FC = () => {
   return (
     <div>
       <Title level={3}>Биллинг</Title>
+
+      {fetchError && (
+        <Alert
+          message="Ошибка загрузки"
+          description={fetchError}
+          type="error"
+          showIcon
+          closable
+          action={
+            <Button size="small" danger onClick={fetchData}>
+              Повторить
+            </Button>
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
       <Card title="Счета и платежи">
         <Row gutter={16} style={{ marginBottom: 16 }}>
