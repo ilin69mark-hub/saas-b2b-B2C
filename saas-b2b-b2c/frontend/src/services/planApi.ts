@@ -34,16 +34,13 @@ export const planApi = createApi({
       { items: Plan[]; total: number },
       { search?: string; page?: number; size?: number; sort?: string; desc?: boolean } | void
     >({
-      query: () => ({
+      query: (params) => ({
         url: 'admin/plans',
         method: 'GET',
-      }),
-      transformResponse: (response: Plan[]) => ({
-        items: response,
-        total: response.length,
+        params,
       }),
       providesTags: (result) =>
-        result
+        result?.items
           ? [
               { type: 'Plan', id: 'LIST' },
               ...result.items.map((p) => ({ type: 'Plan' as const, id: p.id })),
